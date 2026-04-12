@@ -281,11 +281,12 @@ const adminPanelHTML = `<!DOCTYPE html>
       const body = {};
       [
         "bearer_token","admin_token","oidc_url","amazon_q_url",
-        "proxy_url","account_api_url","account_api_token","account_category_id"
+        "account_api_url","account_api_token","account_category_id"
       ].forEach((k) => {
         const v = document.getElementById(k).value;
         if (v !== "") body[k] = v;
       });
+      body.proxy_url = document.getElementById("proxy_url").value;
       try {
         const data = await request("/admin/api/config", "POST", body);
         document.getElementById("config_result").textContent = JSON.stringify(data, null, 2);
