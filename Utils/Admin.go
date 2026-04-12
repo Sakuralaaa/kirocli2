@@ -89,24 +89,26 @@ func GetAdminSnapshot() AdminSnapshot {
 	}
 }
 
-func persistManualAccount(rt Models.RefreshToken) {
+func persistManualAccount(rt Models.RefreshToken) error {
 	if csvPath != "" {
 		csvMutex.Lock()
 		defer csvMutex.Unlock()
 
 		file, err := os.OpenFile(csvPath, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
 		if err != nil {
-			NormalLogger.Printf("Failed to open CSV for append: %v\n", err)
-			return
+			return err
 		}
 		defer file.Close()
 
 		w := csv.NewWriter(file)
 		if err := w.Write([]string{csvEnabledValue, rt.Token, rt.ClientId, rt.ClientSecret}); err != nil {
-			NormalLogger.Printf("Failed to append account into CSV: %v\n", err)
+			return err
 		}
 		w.Flush()
-		return
+		if err := w.Error(); err != nil {
+			return err
+		}
+		return nil
 	}
 
 	csvMutex.Lock()
@@ -123,6 +125,7 @@ func persistManualAccount(rt Models.RefreshToken) {
 		ClientSecret: rt.ClientSecret,
 	})
 	saveAPIAccountsToJSON(accounts)
+	return nil
 }
 
 func AddManualAccount(refreshToken, clientID, clientSecret string, activate bool) (AdminAccountSnapshot, error) {
@@ -162,7 +165,13 @@ func AddManualAccount(refreshToken, clientID, clientSecret string, activate bool
 	if activate {
 		ActiveTokens = append(ActiveTokens, idx)
 	}
-	persistManualAccount(newEntry)
+	if err := persistManualAccount(newEntry); err != nil {
+		RefreshTokens = RefreshTokens[:idx]
+		if activate && len(ActiveTokens) > 0 {
+			ActiveTokens = ActiveTokens[:len(ActiveTokens)-1]
+		}
+		return AdminAccountSnapshot{}, fmt.Errorf("failed to persist account: %w", err)
+	}
 
 	return AdminAccountSnapshot{
 		ID:                  newEntry.ID,

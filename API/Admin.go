@@ -79,28 +79,52 @@ func AdminSetRuntimeConfig(c *gin.Context) {
 	}
 
 	if req.BearerToken != nil {
-		_ = os.Setenv("BEARER_TOKEN", strings.TrimSpace(*req.BearerToken))
+		if err := os.Setenv("BEARER_TOKEN", strings.TrimSpace(*req.BearerToken)); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 	}
 	if req.AdminToken != nil {
-		_ = os.Setenv("ADMIN_TOKEN", strings.TrimSpace(*req.AdminToken))
+		if err := os.Setenv("ADMIN_TOKEN", strings.TrimSpace(*req.AdminToken)); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 	}
 	if req.OIDCURL != nil {
-		_ = os.Setenv("OIDC_URL", strings.TrimSpace(*req.OIDCURL))
+		if err := os.Setenv("OIDC_URL", strings.TrimSpace(*req.OIDCURL)); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 	}
 	if req.AmazonQURL != nil {
-		_ = os.Setenv("AMAZON_Q_URL", strings.TrimSpace(*req.AmazonQURL))
+		if err := os.Setenv("AMAZON_Q_URL", strings.TrimSpace(*req.AmazonQURL)); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 	}
 	if req.ProxyURL != nil {
-		_ = os.Setenv("PROXY_URL", strings.TrimSpace(*req.ProxyURL))
+		if err := os.Setenv("PROXY_URL", strings.TrimSpace(*req.ProxyURL)); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 	}
 	if req.AccountAPIURL != nil {
-		_ = os.Setenv("ACCOUNT_API_URL", strings.TrimSpace(*req.AccountAPIURL))
+		if err := os.Setenv("ACCOUNT_API_URL", strings.TrimSpace(*req.AccountAPIURL)); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 	}
 	if req.AccountAPIToken != nil {
-		_ = os.Setenv("ACCOUNT_API_TOKEN", strings.TrimSpace(*req.AccountAPIToken))
+		if err := os.Setenv("ACCOUNT_API_TOKEN", strings.TrimSpace(*req.AccountAPIToken)); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 	}
 	if req.AccountCategoryID != nil {
-		_ = os.Setenv("ACCOUNT_CATEGORY_ID", strings.TrimSpace(*req.AccountCategoryID))
+		if err := os.Setenv("ACCOUNT_CATEGORY_ID", strings.TrimSpace(*req.AccountCategoryID)); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "runtime config updated"})

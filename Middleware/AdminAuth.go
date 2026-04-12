@@ -16,7 +16,7 @@ func AdminAuth() gin.HandlerFunc {
 		}
 		if expectedToken == "" {
 			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": "Server configuration error: ADMIN_TOKEN or BEARER_TOKEN not set",
+				"error": "Authentication unavailable",
 			})
 			c.Abort()
 			return
