@@ -21,5 +21,17 @@ func setupRouter(r *gin.Engine) {
 	r.POST("/debug/token", API.DebugToken)
 	r.POST("/debug/anthropic2q", API.DebugAnthropic2Q)
 
+	admin := r.Group("/admin")
+	admin.Use(Middleware.AdminAuth())
+	{
+		admin.GET("", API.AdminPanel)
+		admin.GET("/", API.AdminPanel)
+		admin.GET("/api/status", API.AdminStatus)
+		admin.POST("/api/config", API.AdminSetRuntimeConfig)
+		admin.POST("/api/accounts", API.AdminAddAccount)
+		admin.POST("/api/accounts/test", API.AdminTestAccount)
+		admin.POST("/api/tokens/refresh", API.AdminRefreshTokens)
+	}
+
 	r.NoRoute(API.NotFound)
 }
