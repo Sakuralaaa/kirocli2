@@ -36,6 +36,13 @@ import (
 	"kilocli2api/Utils"
 )
 
+func maskTokenPreview(raw string) string {
+	if len(raw) <= 16 {
+		return "****"
+	}
+	return raw[:8] + "..." + raw[len(raw)-8:]
+}
+
 func main() {
 	Utils.InitLoggers()
 
@@ -53,7 +60,8 @@ func main() {
 		if err := os.Setenv("ADMIN_TOKEN", bootstrapAdminToken); err != nil {
 			Utils.NormalLogger.Println("Warning: failed to set bootstrap admin token:", err)
 		} else {
-			Utils.NormalLogger.Printf("Bootstrap admin token: %s\n", bootstrapAdminToken)
+			Utils.NormalLogger.Printf("Bootstrap admin token generated (preview): %s\n", maskTokenPreview(bootstrapAdminToken))
+			Utils.NormalLogger.Printf("Full bootstrap admin token saved at: %s\n", Utils.GetRuntimeConfigPath())
 			Utils.NormalLogger.Println("Security Warning: rotate bootstrap admin token in the admin panel after first login.")
 			if err := Utils.SaveRuntimeConfigFromEnv(); err != nil {
 				Utils.NormalLogger.Println("Warning: failed to persist bootstrap admin token:", err)

@@ -92,7 +92,7 @@ func saveAPIAccountsToJSON(accounts []APIAccount) error {
 	if accounts == nil {
 		accounts = []APIAccount{}
 	}
-	if err := os.MkdirAll(filepath.Dir(apiAccountsPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(apiAccountsPath), 0o700); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(accounts, "", "  ")
@@ -532,7 +532,7 @@ func GetAccessTokenFromRefreshToken(refreshToken Models.RefreshToken) (Models.Ac
 	// Create HTTP request
 	qUrl := os.Getenv("OIDC_URL")
 	if strings.TrimSpace(qUrl) == "" {
-		return Models.AccessToken{}, fmt.Errorf("OIDC_URL not configured; please set it via environment variable or admin panel")
+		return Models.AccessToken{}, fmt.Errorf("OIDC_URL not configured; please set the OIDC_URL environment variable or configure it via the admin panel")
 	}
 	req, err := http.NewRequest("POST", qUrl, bytes.NewBuffer(jsonData))
 	if err != nil {

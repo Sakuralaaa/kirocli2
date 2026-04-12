@@ -67,7 +67,7 @@ func loadRuntimeConfigFile(path string) (RuntimeConfig, error) {
 }
 
 func saveRuntimeConfigFile(path string, cfg RuntimeConfig) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
@@ -75,6 +75,10 @@ func saveRuntimeConfigFile(path string, cfg RuntimeConfig) error {
 		return err
 	}
 	return os.WriteFile(path, data, 0o600)
+}
+
+func GetRuntimeConfigPath() string {
+	return runtimeConfigPath()
 }
 
 func setEnvIfEmpty(key, value string) error {
