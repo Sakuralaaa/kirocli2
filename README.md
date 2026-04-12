@@ -25,15 +25,26 @@
 
 需要 Go 1.24+，或直接使用 Docker。
 
-### 1) 环境变量
+### 1) 启动方式（推荐：先启动，再在管理面板配置）
+
+现在支持**最少环境变量启动**：
+
+- 默认会自动创建并使用 `data/config.json`
+- 若未设置 `ADMIN_TOKEN` 和 `BEARER_TOKEN`，启动时会自动生成一次性 `Bootstrap admin token`（打印在日志中）
+- 进入 `/admin` 后可直接在面板中填写 `OIDC_URL`、`AMAZON_Q_URL`、账号来源等配置，点击更新后会自动持久化到 `data/config.json`
+- 手动录入账号会持久化到 `data/api_accounts.json`
+
+### 2) 环境变量（可选）
 
 | 变量名 | 是否必填 | 说明 |
 | --- | --- | --- |
-| `BEARER_TOKEN` | 是 | 对外 API 鉴权 token（`Authorization: Bearer` 或 `x-api-key`） |
-| `OIDC_URL` | 是 | 使用 refresh token 换取 access token 的 OIDC 地址 |
-| `AMAZON_Q_URL` | 是 | Amazon Q 对话接口地址 |
-| `ACCOUNT_SOURCE` | 否 | 账号来源，`csv`（默认）或 `api` |
-| `ACCOUNTS_CSV_PATH` | `ACCOUNT_SOURCE=csv` 时必填 | 账号 CSV 路径 |
+| `CONFIG_PATH` | 否 | 配置文件路径（默认 `data/config.json`） |
+| `ADMIN_TOKEN` | 否 | 管理面板 token（不填将自动生成 bootstrap token） |
+| `BEARER_TOKEN` | 否 | 对外 API 鉴权 token（可在管理面板设置） |
+| `OIDC_URL` | 否 | 使用 refresh token 换取 access token 的 OIDC 地址（可在管理面板设置） |
+| `AMAZON_Q_URL` | 否 | Amazon Q 对话接口地址（可在管理面板设置） |
+| `ACCOUNT_SOURCE` | 否 | 账号来源，`manual`（默认）/`csv`/`api` |
+| `ACCOUNTS_CSV_PATH` | `ACCOUNT_SOURCE=csv` 时建议配置 | 账号 CSV 路径 |
 | `ACCOUNT_API_URL` | `ACCOUNT_SOURCE=api` 时必填 | 账号池 API 地址 |
 | `ACCOUNT_API_TOKEN` | `ACCOUNT_SOURCE=api` 时必填 | 账号池 API 密钥（`X-Passkey`） |
 | `ACCOUNT_CATEGORY_ID` | 否 | 拉取 API 账号时的分类 ID（默认 `3`） |
@@ -42,11 +53,11 @@
 | `PORT` | 否 | 服务端口（默认 `4000`） |
 | `GIN_MODE` | 否 | `release` / `debug`（默认 `release`） |
 | `PROXY_URL` | 否 | HTTP/HTTPS 代理地址 |
-| `ADMIN_TOKEN` | 否 | 管理面板鉴权 token，不填时默认复用 `BEARER_TOKEN` |
+| `ADMIN_TOKEN` | 否 | 管理面板鉴权 token，不填时默认复用 `BEARER_TOKEN`（若两者都不填则自动生成 bootstrap token） |
 
-> 建议使用 `.env` 管理变量，Docker Compose 默认会挂载 `./.env` 到容器内。
+> 仍可使用 `.env` 管理变量，但已不再要求必须预先配置完整变量。
 
-### 2) CSV 账号文件（`ACCOUNT_SOURCE=csv`）
+### 3) CSV 账号文件（`ACCOUNT_SOURCE=csv`）
 
 CSV 需要至少 4 列，且首行为表头，启用行第一列需为 `True`（当前实现大小写敏感，仅识别 `True`）：
 
@@ -77,7 +88,7 @@ go run .
 - 请求头 `x-admin-token: <ADMIN_TOKEN>`
 - 或 `Authorization: Bearer <ADMIN_TOKEN>`
 
-若未设置 `ADMIN_TOKEN`，默认使用 `BEARER_TOKEN` 作为管理口令。
+若未设置 `ADMIN_TOKEN`，默认使用 `BEARER_TOKEN` 作为管理口令；若二者都没设置，则请使用启动日志里的 `Bootstrap admin token`。
 
 ## Docker 运行
 

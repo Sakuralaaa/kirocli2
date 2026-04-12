@@ -28,8 +28,10 @@ package main
 
 import (
 	"os"
+	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	"kilocli2api/Utils"
 )
@@ -42,15 +44,26 @@ func main() {
 		Utils.NormalLogger.Println("Warning: .env file not found, using system values. Docker user ignore this.")
 	}
 
+	if err := Utils.InitRuntimeConfig(); err != nil {
+		Utils.NormalLogger.Println("Warning: failed to initialize runtime config:", err)
+	}
+
+	if strings.TrimSpace(os.Getenv("ADMIN_TOKEN")) == "" && strings.TrimSpace(os.Getenv("BEARER_TOKEN")) == "" {
+		bootstrapAdminToken := uuid.NewString()
+		if err := os.Setenv("ADMIN_TOKEN", bootstrapAdminToken); err != nil {
+			Utils.NormalLogger.Println("Warning: failed to set bootstrap admin token:", err)
+		} else {
+			Utils.NormalLogger.Printf("Bootstrap admin token: %s\n", bootstrapAdminToken)
+			if err := Utils.SaveRuntimeConfigFromEnv(); err != nil {
+				Utils.NormalLogger.Println("Warning: failed to persist bootstrap admin token:", err)
+			}
+		}
+	}
+
 	if proxyURL := os.Getenv("PROXY_URL"); proxyURL != "" {
 		Utils.NormalLogger.Printf("Using proxy: %s\n", proxyURL)
 	}
 
-	_, err := Utils.GetBearer()
-	if err != nil {
-		Utils.NormalLogger.Println("Error getting initial bearer token:", err)
-		return
-	}
 	Utils.StartTokenRefresher()
 
 	// Get PORT from environment variable, default to 8080

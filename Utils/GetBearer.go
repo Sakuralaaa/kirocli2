@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -25,7 +26,7 @@ var tokenMutex sync.RWMutex
 var csvMutex sync.Mutex
 var tokenIndex int
 var csvPath string
-var apiAccountsPath = "resources/api_accounts.json"
+var apiAccountsPath = "data/api_accounts.json"
 var activeTokenCount int
 var nextRefreshTokenIndex int
 var maxRefreshAttempt int
@@ -34,31 +35,20 @@ func getProxyTransport() *http.Transport {
 	return GetProxyTransport()
 }
 
-func loadAccountsFromCSV(csvPath string) {
-	for {
-		if _, err := os.Stat(csvPath); os.IsNotExist(err) {
-			NormalLogger.Printf("CSV file does not exist: %s, waiting...\n", csvPath)
-			time.Sleep(10 * time.Second)
-			continue
-		}
-		break
+func loadAccountsFromCSV(csvPath string) error {
+	if _, err := os.Stat(csvPath); err != nil {
+		return fmt.Errorf("csv file unavailable: %w", err)
 	}
-
 	file, err := os.Open(csvPath)
 	if err != nil {
-		panic(fmt.Sprintf("Failed to open CSV file: %v", err))
+		return fmt.Errorf("failed to open CSV file: %w", err)
 	}
-	defer func(file *os.File) {
-		err := file.Close()
-		if err != nil {
-			panic(fmt.Sprintf("Failed to close CSV file: %v", err))
-		}
-	}(file)
+	defer file.Close()
 
 	reader := csv.NewReader(file)
 	records, err := reader.ReadAll()
 	if err != nil {
-		panic(fmt.Sprintf("Failed to read CSV file: %v", err))
+		return fmt.Errorf("failed to read CSV file: %w", err)
 	}
 
 	for i, record := range records {
@@ -75,8 +65,9 @@ func loadAccountsFromCSV(csvPath string) {
 	}
 
 	if len(RefreshTokens) == 0 {
-		panic("No enabled accounts found in CSV")
+		return fmt.Errorf("no enabled accounts found in csv")
 	}
+	return nil
 }
 
 type APIAccount struct {
@@ -97,18 +88,21 @@ type APIAccountData struct {
 	ClientSecret string `json:"client_secret"`
 }
 
-func saveAPIAccountsToJSON(accounts []APIAccount) {
+func saveAPIAccountsToJSON(accounts []APIAccount) error {
 	if accounts == nil {
 		accounts = []APIAccount{}
 	}
+	if err := os.MkdirAll(filepath.Dir(apiAccountsPath), 0o755); err != nil {
+		return err
+	}
 	data, err := json.MarshalIndent(accounts, "", "  ")
 	if err != nil {
-		NormalLogger.Printf("Failed to marshal accounts to JSON: %v\n", err)
-		return
+		return err
 	}
 	if err := os.WriteFile(apiAccountsPath, data, 0644); err != nil {
-		NormalLogger.Printf("Failed to save accounts to JSON: %v\n", err)
+		return err
 	}
+	return nil
 }
 
 func loadAPIAccountsFromJSON() ([]APIAccount, error) {
@@ -134,10 +128,29 @@ func removeAccountFromJSON(refreshToken string) {
 	for i, acc := range accounts {
 		if acc.RefreshToken == refreshToken {
 			accounts = append(accounts[:i], accounts[i+1:]...)
-			saveAPIAccountsToJSON(accounts)
+			if err := saveAPIAccountsToJSON(accounts); err != nil {
+				NormalLogger.Printf("Failed to save accounts to JSON: %v\n", err)
+			}
 			return
 		}
 	}
+}
+
+func loadCachedAccounts() int {
+	cached, err := loadAPIAccountsFromJSON()
+	if err != nil || len(cached) == 0 {
+		return 0
+	}
+	NormalLogger.Printf("Loaded %d accounts from cache\n", len(cached))
+	for _, acc := range cached {
+		RefreshTokens = append(RefreshTokens, Models.RefreshToken{
+			ID:           acc.ID,
+			Token:        acc.RefreshToken,
+			ClientId:     acc.ClientID,
+			ClientSecret: strings.ReplaceAll(acc.ClientSecret, "\r", ""),
+		})
+	}
+	return len(cached)
 }
 
 func nextAvailableRefreshTokenIndexLocked() (int, bool) {
@@ -183,22 +196,12 @@ func banAccountViaAPI(accountID int) {
 	NormalLogger.Printf("Banned account %d via API\n", accountID)
 }
 
-func loadAccountsFromAPI(apiURL, apiToken string, count int) {
+func loadAccountsFromAPI(apiURL, apiToken string, count int) error {
 	// Try loading from cache first
 	if len(RefreshTokens) == 0 {
-		if cached, err := loadAPIAccountsFromJSON(); err == nil && len(cached) > 0 {
-			NormalLogger.Printf("Loaded %d accounts from cache\n", len(cached))
-			for _, acc := range cached {
-				RefreshTokens = append(RefreshTokens, Models.RefreshToken{
-					ID:           acc.ID,
-					Token:        acc.RefreshToken,
-					ClientId:     acc.ClientID,
-					ClientSecret: strings.ReplaceAll(acc.ClientSecret, "\r", ""),
-				})
-			}
-			if len(RefreshTokens) >= count {
-				return
-			}
+		loadCachedAccounts()
+		if len(RefreshTokens) >= count {
+			return nil
 		}
 	}
 
@@ -210,7 +213,7 @@ func loadAccountsFromAPI(apiURL, apiToken string, count int) {
 	reqBody, _ := json.Marshal(map[string]int{"category_id": categoryID, "count": count})
 	req, err := http.NewRequest("POST", apiURL+"/api/accounts/fetch", bytes.NewBuffer(reqBody))
 	if err != nil {
-		panic(fmt.Sprintf("Failed to create API request: %v", err))
+		return fmt.Errorf("failed to create API request: %w", err)
 	}
 
 	req.Header.Set("X-Passkey", apiToken)
@@ -219,18 +222,18 @@ func loadAccountsFromAPI(apiURL, apiToken string, count int) {
 	client := &http.Client{Transport: getProxyTransport(), Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		panic(fmt.Sprintf("Failed to fetch accounts from API: %v", err))
+		return fmt.Errorf("failed to fetch accounts from API: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		panic(fmt.Sprintf("API returned status %d: %s", resp.StatusCode, string(body)))
+		return fmt.Errorf("api returned status %d: %s", resp.StatusCode, string(body))
 	}
 
 	var accounts []APIAccountResponse
 	if err := json.NewDecoder(resp.Body).Decode(&accounts); err != nil {
-		panic(fmt.Sprintf("Failed to parse API response: %v", err))
+		return fmt.Errorf("failed to parse API response: %w", err)
 	}
 
 	for _, acc := range accounts {
@@ -260,11 +263,14 @@ func loadAccountsFromAPI(apiURL, apiToken string, count int) {
 			ClientSecret: rt.ClientSecret,
 		})
 	}
-	saveAPIAccountsToJSON(allAccounts)
+	if err := saveAPIAccountsToJSON(allAccounts); err != nil {
+		NormalLogger.Printf("Failed to save accounts cache: %v\n", err)
+	}
 
 	if len(RefreshTokens) == 0 {
-		panic("No accounts received from API")
+		return fmt.Errorf("no accounts received from api")
 	}
+	return nil
 }
 
 func DisableToken(accessToken string, reason string) {
@@ -314,7 +320,10 @@ func fetchAndAddNewToken() {
 		if apiURL == "" || apiToken == "" {
 			return
 		}
-		loadAccountsFromAPI(apiURL, apiToken, 1)
+		if err := loadAccountsFromAPI(apiURL, apiToken, 1); err != nil {
+			NormalLogger.Printf("Failed to fetch new token account from API: %v\n", err)
+			return
+		}
 		tokenMutex.Lock()
 		defer tokenMutex.Unlock()
 
@@ -386,6 +395,9 @@ func GetBearer() (string, error) {
 		} else {
 			_, _ = fmt.Sscanf(activeTokenCountStr, "%d", &activeTokenCount)
 		}
+		if activeTokenCount <= 0 {
+			activeTokenCount = 10
+		}
 
 		maxRefreshAttemptStr := os.Getenv("MAX_REFRESH_ATTEMPT")
 		if maxRefreshAttemptStr == "" {
@@ -393,35 +405,48 @@ func GetBearer() (string, error) {
 		} else {
 			_, _ = fmt.Sscanf(maxRefreshAttemptStr, "%d", &maxRefreshAttempt)
 		}
+		if maxRefreshAttempt <= 0 {
+			maxRefreshAttempt = 3
+		}
 
 		accountSource := os.Getenv("ACCOUNT_SOURCE")
 		if accountSource == "" {
-			accountSource = "csv"
+			accountSource = "manual"
 		}
 
-		if accountSource == "api" {
+		switch accountSource {
+		case "api":
 			apiURL := os.Getenv("ACCOUNT_API_URL")
 			apiToken := os.Getenv("ACCOUNT_API_TOKEN")
 			if apiURL == "" || apiToken == "" {
-				panic("ACCOUNT_API_URL and ACCOUNT_API_TOKEN must be set when ACCOUNT_SOURCE=api")
+				NormalLogger.Println("ACCOUNT_SOURCE=api but ACCOUNT_API_URL or ACCOUNT_API_TOKEN missing; waiting for admin configuration")
+				break
 			}
 			NormalLogger.Printf("Loading accounts from API: %s\n", apiURL)
-			loadAccountsFromAPI(apiURL, apiToken, activeTokenCount)
-		} else {
+			if err := loadAccountsFromAPI(apiURL, apiToken, activeTokenCount); err != nil {
+				NormalLogger.Printf("Failed to load accounts from API: %v\n", err)
+			}
+		case "csv":
 			csvPath = os.Getenv("ACCOUNTS_CSV_PATH")
 			if csvPath == "" {
-				panic("ACCOUNTS_CSV_PATH environment variable not set")
+				NormalLogger.Println("ACCOUNT_SOURCE=csv but ACCOUNTS_CSV_PATH missing; waiting for admin configuration")
+				break
 			}
 			NormalLogger.Printf("Loading accounts from CSV: %s\n", csvPath)
-			loadAccountsFromCSV(csvPath)
+			if err := loadAccountsFromCSV(csvPath); err != nil {
+				NormalLogger.Printf("Failed to load accounts from CSV: %v\n", err)
+			}
+		default:
+			loadCachedAccounts()
 		}
 
-		if activeTokenCount > len(RefreshTokens) {
-			activeTokenCount = len(RefreshTokens)
+		activateCount := activeTokenCount
+		if activateCount > len(RefreshTokens) {
+			activateCount = len(RefreshTokens)
 		}
 
 		tokenMutex.Lock()
-		for i := 0; i < activeTokenCount; i++ {
+		for i := 0; i < activateCount; i++ {
 			var accessToken Models.AccessToken
 			var err error
 			for attempt := 0; attempt < maxRefreshAttempt; attempt++ {
@@ -436,10 +461,10 @@ func GetBearer() (string, error) {
 			}
 			RefreshTokens[i].AccessToken = accessToken
 			ActiveTokens = append(ActiveTokens, i)
-			NormalLogger.Printf("Get Access Token OK! %s\n", RefreshTokens[i].AccessToken.Token)
+			NormalLogger.Printf("Get Access Token OK for account %d\n", i)
 		}
 		tokenMutex.Unlock()
-		nextRefreshTokenIndex = activeTokenCount
+		nextRefreshTokenIndex = activateCount
 	})
 
 	tokenMutex.Lock()
@@ -506,6 +531,9 @@ func GetAccessTokenFromRefreshToken(refreshToken Models.RefreshToken) (Models.Ac
 
 	// Create HTTP request
 	qUrl := os.Getenv("OIDC_URL")
+	if strings.TrimSpace(qUrl) == "" {
+		return Models.AccessToken{}, fmt.Errorf("OIDC_URL not configured")
+	}
 	req, err := http.NewRequest("POST", qUrl, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return Models.AccessToken{}, fmt.Errorf("failed to create request: %w", err)
