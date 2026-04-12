@@ -99,7 +99,7 @@ func saveAPIAccountsToJSON(accounts []APIAccount) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(apiAccountsPath, data, 0644); err != nil {
+	if err := os.WriteFile(apiAccountsPath, data, 0o600); err != nil {
 		return err
 	}
 	return nil

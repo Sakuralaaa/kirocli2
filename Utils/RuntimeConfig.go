@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	defaultRuntimeConfigPath = "data/config.json"
+	DefaultRuntimeConfigPath = "data/config.json"
 	DefaultPort              = "4000"
 	DefaultGinMode           = "release"
 	DefaultAccountSource     = "manual"
@@ -38,7 +38,7 @@ type RuntimeConfig struct {
 func runtimeConfigPath() string {
 	path := strings.TrimSpace(os.Getenv("CONFIG_PATH"))
 	if path == "" {
-		return defaultRuntimeConfigPath
+		return DefaultRuntimeConfigPath
 	}
 	return path
 }
