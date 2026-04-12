@@ -391,22 +391,22 @@ func GetBearer() (string, error) {
 	initDoOnce.Do(func() {
 		activeTokenCountStr := os.Getenv("ACTIVE_TOKEN_COUNT")
 		if activeTokenCountStr == "" {
-			activeTokenCount = 10
+			activeTokenCount = DefaultActiveTokenCount
 		} else {
 			_, _ = fmt.Sscanf(activeTokenCountStr, "%d", &activeTokenCount)
 		}
 		if activeTokenCount <= 0 {
-			activeTokenCount = 10
+			activeTokenCount = DefaultActiveTokenCount
 		}
 
 		maxRefreshAttemptStr := os.Getenv("MAX_REFRESH_ATTEMPT")
 		if maxRefreshAttemptStr == "" {
-			maxRefreshAttempt = 3
+			maxRefreshAttempt = DefaultMaxRefreshAttempt
 		} else {
 			_, _ = fmt.Sscanf(maxRefreshAttemptStr, "%d", &maxRefreshAttempt)
 		}
 		if maxRefreshAttempt <= 0 {
-			maxRefreshAttempt = 3
+			maxRefreshAttempt = DefaultMaxRefreshAttempt
 		}
 
 		accountSource := os.Getenv("ACCOUNT_SOURCE")
@@ -532,7 +532,7 @@ func GetAccessTokenFromRefreshToken(refreshToken Models.RefreshToken) (Models.Ac
 	// Create HTTP request
 	qUrl := os.Getenv("OIDC_URL")
 	if strings.TrimSpace(qUrl) == "" {
-		return Models.AccessToken{}, fmt.Errorf("OIDC_URL not configured")
+		return Models.AccessToken{}, fmt.Errorf("OIDC_URL not configured; please set it via environment variable or admin panel")
 	}
 	req, err := http.NewRequest("POST", qUrl, bytes.NewBuffer(jsonData))
 	if err != nil {

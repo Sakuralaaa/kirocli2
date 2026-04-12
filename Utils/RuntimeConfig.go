@@ -4,10 +4,19 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
-const defaultRuntimeConfigPath = "data/config.json"
+const (
+	defaultRuntimeConfigPath = "data/config.json"
+	DefaultPort              = "4000"
+	DefaultGinMode           = "release"
+	DefaultAccountSource     = "manual"
+	DefaultAccountCategoryID = "3"
+	DefaultActiveTokenCount  = 10
+	DefaultMaxRefreshAttempt = 3
+)
 
 type RuntimeConfig struct {
 	Port              string `json:"port"`
@@ -36,12 +45,12 @@ func runtimeConfigPath() string {
 
 func defaultRuntimeConfig() RuntimeConfig {
 	return RuntimeConfig{
-		Port:              "4000",
-		GinMode:           "release",
-		AccountSource:     "manual",
-		AccountCategoryID: "3",
-		ActiveTokenCount:  "10",
-		MaxRefreshAttempt: "3",
+		Port:              DefaultPort,
+		GinMode:           DefaultGinMode,
+		AccountSource:     DefaultAccountSource,
+		AccountCategoryID: DefaultAccountCategoryID,
+		ActiveTokenCount:  strconv.Itoa(DefaultActiveTokenCount),
+		MaxRefreshAttempt: strconv.Itoa(DefaultMaxRefreshAttempt),
 	}
 }
 
@@ -65,7 +74,7 @@ func saveRuntimeConfigFile(path string, cfg RuntimeConfig) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	return os.WriteFile(path, data, 0o600)
 }
 
 func setEnvIfEmpty(key, value string) error {

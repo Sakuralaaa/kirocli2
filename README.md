@@ -31,6 +31,7 @@
 
 - 默认会自动创建并使用 `data/config.json`
 - 若未设置 `ADMIN_TOKEN` 和 `BEARER_TOKEN`，启动时会自动生成一次性 `Bootstrap admin token`（打印在日志中）
+- 首次登录后请尽快在管理面板中更新 `ADMIN_TOKEN`
 - 进入 `/admin` 后可直接在面板中填写 `OIDC_URL`、`AMAZON_Q_URL`、账号来源等配置，点击更新后会自动持久化到 `data/config.json`
 - 手动录入账号会持久化到 `data/api_accounts.json`
 
@@ -97,6 +98,8 @@ go run .
 ```bash
 docker compose up -d --build
 ```
+
+> 若你之前使用 `./resources` 挂载账号缓存，请迁移到 `./data`（新默认路径）。
 
 ### 方式二：Docker 手动构建
 

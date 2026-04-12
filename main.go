@@ -54,6 +54,7 @@ func main() {
 			Utils.NormalLogger.Println("Warning: failed to set bootstrap admin token:", err)
 		} else {
 			Utils.NormalLogger.Printf("Bootstrap admin token: %s\n", bootstrapAdminToken)
+			Utils.NormalLogger.Println("Security warning: rotate bootstrap admin token in the admin panel after first login.")
 			if err := Utils.SaveRuntimeConfigFromEnv(); err != nil {
 				Utils.NormalLogger.Println("Warning: failed to persist bootstrap admin token:", err)
 			}
