@@ -46,7 +46,7 @@
 
 ### 2) CSV 账号文件（`ACCOUNT_SOURCE=csv`）
 
-CSV 需要至少 4 列，且首行为表头，启用行第一列需为 `True`：
+CSV 需要至少 4 列，且首行为表头，启用行第一列需为 `True`（当前实现大小写敏感，仅识别 `True`）：
 
 `enabled,refresh_token,client_id,client_secret`
 
