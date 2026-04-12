@@ -76,7 +76,7 @@ func GetAdminSnapshot() AdminSnapshot {
 
 	accountSource := os.Getenv("ACCOUNT_SOURCE")
 	if accountSource == "" {
-		accountSource = "csv"
+		accountSource = "manual"
 	}
 
 	return AdminSnapshot{
@@ -124,8 +124,7 @@ func persistManualAccount(rt Models.RefreshToken) error {
 		ClientID:     rt.ClientId,
 		ClientSecret: rt.ClientSecret,
 	})
-	saveAPIAccountsToJSON(accounts)
-	return nil
+	return saveAPIAccountsToJSON(accounts)
 }
 
 func AddManualAccount(refreshToken, clientID, clientSecret string, activate bool) (AdminAccountSnapshot, error) {

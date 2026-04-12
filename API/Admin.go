@@ -16,9 +16,13 @@ type adminConfigRequest struct {
 	OIDCURL           *string `json:"oidc_url"`
 	AmazonQURL        *string `json:"amazon_q_url"`
 	ProxyURL          *string `json:"proxy_url"`
+	AccountSource     *string `json:"account_source"`
+	AccountsCSVPath   *string `json:"accounts_csv_path"`
 	AccountAPIURL     *string `json:"account_api_url"`
 	AccountAPIToken   *string `json:"account_api_token"`
 	AccountCategoryID *string `json:"account_category_id"`
+	ActiveTokenCount  *string `json:"active_token_count"`
+	MaxRefreshAttempt *string `json:"max_refresh_attempt"`
 }
 
 type addAccountRequest struct {
@@ -57,7 +61,7 @@ func AdminStatus(c *gin.Context) {
 		"runtime_config": gin.H{
 			"port":                envOrDefault("PORT", "4000"),
 			"gin_mode":            envOrDefault("GIN_MODE", "release"),
-			"account_source":      envOrDefault("ACCOUNT_SOURCE", "csv"),
+			"account_source":      envOrDefault("ACCOUNT_SOURCE", "manual"),
 			"accounts_csv_path":   os.Getenv("ACCOUNTS_CSV_PATH"),
 			"oidc_url":            os.Getenv("OIDC_URL"),
 			"amazon_q_url":        os.Getenv("AMAZON_Q_URL"),
@@ -65,6 +69,8 @@ func AdminStatus(c *gin.Context) {
 			"account_api_url":     os.Getenv("ACCOUNT_API_URL"),
 			"account_api_token":   maskSecret(os.Getenv("ACCOUNT_API_TOKEN")),
 			"account_category_id": envOrDefault("ACCOUNT_CATEGORY_ID", "3"),
+			"active_token_count":  envOrDefault("ACTIVE_TOKEN_COUNT", "10"),
+			"max_refresh_attempt": envOrDefault("MAX_REFRESH_ATTEMPT", "3"),
 			"bearer_token":        maskSecret(os.Getenv("BEARER_TOKEN")),
 			"admin_token":         maskSecret(envOrDefault("ADMIN_TOKEN", os.Getenv("BEARER_TOKEN"))),
 		},
@@ -108,6 +114,18 @@ func AdminSetRuntimeConfig(c *gin.Context) {
 			return
 		}
 	}
+	if req.AccountSource != nil {
+		if err := os.Setenv("ACCOUNT_SOURCE", strings.TrimSpace(*req.AccountSource)); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	}
+	if req.AccountsCSVPath != nil {
+		if err := os.Setenv("ACCOUNTS_CSV_PATH", strings.TrimSpace(*req.AccountsCSVPath)); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	}
 	if req.AccountAPIURL != nil {
 		if err := os.Setenv("ACCOUNT_API_URL", strings.TrimSpace(*req.AccountAPIURL)); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -125,6 +143,23 @@ func AdminSetRuntimeConfig(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+	}
+	if req.ActiveTokenCount != nil {
+		if err := os.Setenv("ACTIVE_TOKEN_COUNT", strings.TrimSpace(*req.ActiveTokenCount)); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	}
+	if req.MaxRefreshAttempt != nil {
+		if err := os.Setenv("MAX_REFRESH_ATTEMPT", strings.TrimSpace(*req.MaxRefreshAttempt)); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	}
+
+	if err := Utils.SaveRuntimeConfigFromEnv(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "runtime config updated"})
@@ -235,11 +270,19 @@ const adminPanelHTML = `<!DOCTYPE html>
     </div>
     <div class="row">
       <div><input id="proxy_url" placeholder="PROXY_URL（可选，可留空清空）" /></div>
+      <div><input id="account_source" placeholder="ACCOUNT_SOURCE（manual/csv/api，可选）" /></div>
+    </div>
+    <div class="row">
+      <div><input id="accounts_csv_path" placeholder="ACCOUNTS_CSV_PATH（可选）" /></div>
       <div><input id="account_api_url" placeholder="ACCOUNT_API_URL（可选）" /></div>
     </div>
     <div class="row">
       <div><input id="account_api_token" placeholder="ACCOUNT_API_TOKEN（可选）" /></div>
       <div><input id="account_category_id" placeholder="ACCOUNT_CATEGORY_ID（可选）" /></div>
+    </div>
+    <div class="row">
+      <div><input id="active_token_count" placeholder="ACTIVE_TOKEN_COUNT（可选）" /></div>
+      <div><input id="max_refresh_attempt" placeholder="MAX_REFRESH_ATTEMPT（可选）" /></div>
     </div>
     <button onclick="updateConfig()">更新配置</button>
     <pre id="config_result"></pre>
@@ -305,7 +348,8 @@ const adminPanelHTML = `<!DOCTYPE html>
       const body = {};
       [
         "bearer_token","admin_token","oidc_url","amazon_q_url",
-        "account_api_url","account_api_token","account_category_id"
+        "account_source","accounts_csv_path","account_api_url","account_api_token",
+        "account_category_id","active_token_count","max_refresh_attempt"
       ].forEach((k) => {
         const v = document.getElementById(k).value;
         if (v !== "") body[k] = v;

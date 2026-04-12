@@ -9,6 +9,5 @@ services:
       - PORT=4000
       - GIN_MODE=release
     volumes:
-      - ./.env:/app/.env:ro
-      - ./resources:/app/resources
+      - ./data:/app/data
     restart: unless-stopped
