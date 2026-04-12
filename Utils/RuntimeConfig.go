@@ -77,19 +77,19 @@ func setEnvIfEmpty(key, value string) error {
 
 func applyConfigToEnv(cfg RuntimeConfig) error {
 	pairs := map[string]string{
-		"PORT":               cfg.Port,
-		"GIN_MODE":           cfg.GinMode,
-		"BEARER_TOKEN":       cfg.BearerToken,
-		"ADMIN_TOKEN":        cfg.AdminToken,
-		"OIDC_URL":           cfg.OIDCURL,
-		"AMAZON_Q_URL":       cfg.AmazonQURL,
-		"PROXY_URL":          cfg.ProxyURL,
-		"ACCOUNT_SOURCE":     cfg.AccountSource,
-		"ACCOUNTS_CSV_PATH":  cfg.AccountsCSVPath,
-		"ACCOUNT_API_URL":    cfg.AccountAPIURL,
-		"ACCOUNT_API_TOKEN":  cfg.AccountAPIToken,
+		"PORT":                cfg.Port,
+		"GIN_MODE":            cfg.GinMode,
+		"BEARER_TOKEN":        cfg.BearerToken,
+		"ADMIN_TOKEN":         cfg.AdminToken,
+		"OIDC_URL":            cfg.OIDCURL,
+		"AMAZON_Q_URL":        cfg.AmazonQURL,
+		"PROXY_URL":           cfg.ProxyURL,
+		"ACCOUNT_SOURCE":      cfg.AccountSource,
+		"ACCOUNTS_CSV_PATH":   cfg.AccountsCSVPath,
+		"ACCOUNT_API_URL":     cfg.AccountAPIURL,
+		"ACCOUNT_API_TOKEN":   cfg.AccountAPIToken,
 		"ACCOUNT_CATEGORY_ID": cfg.AccountCategoryID,
-		"ACTIVE_TOKEN_COUNT": cfg.ActiveTokenCount,
+		"ACTIVE_TOKEN_COUNT":  cfg.ActiveTokenCount,
 		"MAX_REFRESH_ATTEMPT": cfg.MaxRefreshAttempt,
 	}
 	for key, value := range pairs {
