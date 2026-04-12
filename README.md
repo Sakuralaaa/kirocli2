@@ -19,6 +19,7 @@
 - `GET /v1/models`
 - `POST /debug/token`（无鉴权）
 - `POST /debug/anthropic2q`（无鉴权）
+- `GET /admin`（管理面板，需 admin token）
 
 ## 运行前准备
 
@@ -41,6 +42,7 @@
 | `PORT` | 否 | 服务端口（默认 `4000`） |
 | `GIN_MODE` | 否 | `release` / `debug`（默认 `release`） |
 | `PROXY_URL` | 否 | HTTP/HTTPS 代理地址 |
+| `ADMIN_TOKEN` | 否 | 管理面板鉴权 token，不填时默认复用 `BEARER_TOKEN` |
 
 > 建议使用 `.env` 管理变量，Docker Compose 默认会挂载 `./.env` 到容器内。
 
@@ -58,6 +60,24 @@ go run .
 ```
 
 默认监听 `:4000`。
+
+## 管理面板（支持云端部署）
+
+服务内置管理面板，无需额外前端构建，容器/云端部署后可直接访问：
+
+- 页面：`GET /admin`
+- 状态：`GET /admin/api/status`
+- 手动录入账号：`POST /admin/api/accounts`
+- 手动测试账号：`POST /admin/api/accounts/test`
+- 手动刷新活跃 token：`POST /admin/api/tokens/refresh`
+- 运行时更新配置：`POST /admin/api/config`
+
+鉴权方式：
+
+- 请求头 `x-admin-token: <ADMIN_TOKEN>`
+- 或 `Authorization: Bearer <ADMIN_TOKEN>`
+
+若未设置 `ADMIN_TOKEN`，默认使用 `BEARER_TOKEN` 作为管理口令。
 
 ## Docker 运行
 
