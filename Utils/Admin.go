@@ -10,6 +10,8 @@ import (
 	"kilocli2api/Models"
 )
 
+const csvEnabledValue = "True"
+
 type AdminAccountSnapshot struct {
 	ID                  int    `json:"id"`
 	ClientID            string `json:"client_id"`
@@ -100,7 +102,7 @@ func persistManualAccount(rt Models.RefreshToken) {
 		defer file.Close()
 
 		w := csv.NewWriter(file)
-		if err := w.Write([]string{"True", rt.Token, rt.ClientId, rt.ClientSecret}); err != nil {
+		if err := w.Write([]string{csvEnabledValue, rt.Token, rt.ClientId, rt.ClientSecret}); err != nil {
 			NormalLogger.Printf("Failed to append account into CSV: %v\n", err)
 		}
 		w.Flush()

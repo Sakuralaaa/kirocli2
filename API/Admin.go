@@ -163,7 +163,7 @@ const adminPanelHTML = `<!DOCTYPE html>
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>kirocli2 管理面板</title>
+  <title>kilocli2 管理面板</title>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 24px; color: #111827; background: #f8fafc; }
     .card { background: white; border: 1px solid #e5e7eb; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
@@ -177,7 +177,7 @@ const adminPanelHTML = `<!DOCTYPE html>
   </style>
 </head>
 <body>
-  <h1>kirocli2 管理面板</h1>
+  <h1>kilocli2 管理面板</h1>
   <p class="small">云端部署可直接访问该页面；请在请求头中携带 <code>x-admin-token</code>（或 Authorization Bearer）。</p>
 
   <div class="card">
