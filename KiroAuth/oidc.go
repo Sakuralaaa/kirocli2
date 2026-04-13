@@ -33,7 +33,7 @@ func RefreshToken(input RefreshInput) (string, string, int64, error) {
 			if oidcErr == nil {
 				return oidcAccess, oidcRefresh, oidcExpires, nil
 			}
-			return "", "", 0, fmt.Errorf("token refresh failed")
+			return "", "", 0, fmt.Errorf("token refresh failed; please verify refreshToken/authMethod/client credentials")
 		}
 		// Missing OIDC client credentials: keep original social refresh error.
 		return "", "", 0, err
@@ -46,7 +46,7 @@ func RefreshToken(input RefreshInput) (string, string, int64, error) {
 	if socialErr == nil {
 		return socialAccess, socialRefresh, socialExpires, nil
 	}
-	return "", "", 0, fmt.Errorf("token refresh failed")
+	return "", "", 0, fmt.Errorf("token refresh failed; please verify refreshToken/authMethod/client credentials")
 }
 
 func refreshOIDCToken(refreshToken, clientID, clientSecret, region string) (string, string, int64, error) {
