@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -19,9 +20,28 @@ type RefreshInput struct {
 
 func RefreshToken(input RefreshInput) (string, string, int64, error) {
 	if input.AuthMethod == "social" {
-		return refreshSocialToken(input.RefreshToken)
+		accessToken, refreshToken, expiresAt, err := refreshSocialToken(input.RefreshToken)
+		if err == nil {
+			return accessToken, refreshToken, expiresAt, nil
+		}
+		if strings.TrimSpace(input.ClientID) != "" && strings.TrimSpace(input.ClientSecret) != "" {
+			oidcAccess, oidcRefresh, oidcExpires, oidcErr := refreshOIDCToken(input.RefreshToken, input.ClientID, input.ClientSecret, input.Region)
+			if oidcErr == nil {
+				return oidcAccess, oidcRefresh, oidcExpires, nil
+			}
+			return "", "", 0, fmt.Errorf("social refresh failed: %v; oidc fallback failed: %v", err, oidcErr)
+		}
+		return "", "", 0, err
 	}
-	return refreshOIDCToken(input.RefreshToken, input.ClientID, input.ClientSecret, input.Region)
+	accessToken, refreshToken, expiresAt, err := refreshOIDCToken(input.RefreshToken, input.ClientID, input.ClientSecret, input.Region)
+	if err == nil {
+		return accessToken, refreshToken, expiresAt, nil
+	}
+	socialAccess, socialRefresh, socialExpires, socialErr := refreshSocialToken(input.RefreshToken)
+	if socialErr == nil {
+		return socialAccess, socialRefresh, socialExpires, nil
+	}
+	return "", "", 0, fmt.Errorf("oidc refresh failed: %v; social fallback failed: %v", err, socialErr)
 }
 
 func refreshOIDCToken(refreshToken, clientID, clientSecret, region string) (string, string, int64, error) {
