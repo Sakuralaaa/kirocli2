@@ -19,29 +19,33 @@ type RefreshInput struct {
 }
 
 func RefreshToken(input RefreshInput) (string, string, int64, error) {
+	clientID := strings.TrimSpace(input.ClientID)
+	clientSecret := strings.TrimSpace(input.ClientSecret)
+	refreshToken := strings.TrimSpace(input.RefreshToken)
+
 	if input.AuthMethod == "social" {
-		accessToken, refreshToken, expiresAt, err := refreshSocialToken(input.RefreshToken)
+		accessToken, newRefreshToken, expiresAt, err := refreshSocialToken(refreshToken)
 		if err == nil {
-			return accessToken, refreshToken, expiresAt, nil
+			return accessToken, newRefreshToken, expiresAt, nil
 		}
-		if strings.TrimSpace(input.ClientID) != "" && strings.TrimSpace(input.ClientSecret) != "" {
-			oidcAccess, oidcRefresh, oidcExpires, oidcErr := refreshOIDCToken(input.RefreshToken, input.ClientID, input.ClientSecret, input.Region)
+		if clientID != "" && clientSecret != "" {
+			oidcAccess, oidcRefresh, oidcExpires, oidcErr := refreshOIDCToken(refreshToken, clientID, clientSecret, input.Region)
 			if oidcErr == nil {
 				return oidcAccess, oidcRefresh, oidcExpires, nil
 			}
-			return "", "", 0, fmt.Errorf("social refresh failed: %v; oidc fallback failed: %v", err, oidcErr)
+			return "", "", 0, fmt.Errorf("social refresh failed: %v; attempted OIDC fallback but also failed: %v", err, oidcErr)
 		}
 		return "", "", 0, err
 	}
-	accessToken, refreshToken, expiresAt, err := refreshOIDCToken(input.RefreshToken, input.ClientID, input.ClientSecret, input.Region)
+	accessToken, newRefreshToken, expiresAt, err := refreshOIDCToken(refreshToken, clientID, clientSecret, input.Region)
 	if err == nil {
-		return accessToken, refreshToken, expiresAt, nil
+		return accessToken, newRefreshToken, expiresAt, nil
 	}
-	socialAccess, socialRefresh, socialExpires, socialErr := refreshSocialToken(input.RefreshToken)
+	socialAccess, socialRefresh, socialExpires, socialErr := refreshSocialToken(refreshToken)
 	if socialErr == nil {
 		return socialAccess, socialRefresh, socialExpires, nil
 	}
-	return "", "", 0, fmt.Errorf("oidc refresh failed: %v; social fallback failed: %v", err, socialErr)
+	return "", "", 0, fmt.Errorf("oidc refresh failed: %v; attempted social fallback but also failed: %v", err, socialErr)
 }
 
 func refreshOIDCToken(refreshToken, clientID, clientSecret, region string) (string, string, int64, error) {
