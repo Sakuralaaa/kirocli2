@@ -468,6 +468,58 @@ func ParseAccountID(raw string) (int, error) {
 	return id, nil
 }
 
+func GetAccountTokenStateByID(id int) (Models.RefreshToken, bool, bool) {
+	tokenMutex.RLock()
+	defer tokenMutex.RUnlock()
+	for idx, item := range RefreshTokens {
+		if item.ID != id {
+			continue
+		}
+		isActive := hasActiveTokenIndexInSlice(ActiveTokens, idx) && !item.Disabled
+		return item, isActive, true
+	}
+	return Models.RefreshToken{}, false, false
+}
+
+func hasActiveTokenIndexInSlice(indices []int, targetIdx int) bool {
+	for _, idx := range indices {
+		if idx == targetIdx {
+			return true
+		}
+	}
+	return false
+}
+
+func SetAccountTokenByID(id int, accessToken string, expiresAt int64) error {
+	tokenMutex.Lock()
+	defer tokenMutex.Unlock()
+	for idx := range RefreshTokens {
+		if RefreshTokens[idx].ID != id {
+			continue
+		}
+		RefreshTokens[idx].AccessToken = Models.AccessToken{
+			Token:     strings.TrimSpace(accessToken),
+			ExpiresAt: expiresAt,
+		}
+		return persistAllAccountsLocked()
+	}
+	return fmt.Errorf("account not found")
+}
+
+func AddImportedAccountWithAccessToken(refreshToken, clientID, clientSecret, accessToken string, expiresAt int64, enabled bool) (AdminAccountSnapshot, error) {
+	account, err := AddManualAccount(refreshToken, clientID, clientSecret, enabled)
+	if err != nil {
+		return AdminAccountSnapshot{}, err
+	}
+	if strings.TrimSpace(accessToken) != "" {
+		_ = SetAccountTokenByID(account.ID, accessToken, expiresAt)
+	}
+	if enabled {
+		_, _ = RefreshAllActiveTokensNow()
+	}
+	return account, nil
+}
+
 func RefreshAllActiveTokensNow() (int, int) {
 	tokenMutex.Lock()
 	defer tokenMutex.Unlock()

@@ -6,11 +6,15 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"kilocli2api/Utils"
 )
 
 func AdminAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		expectedToken := os.Getenv("ADMIN_TOKEN")
+		if expected := strings.TrimSpace(Utils.GetKiroGoAdminPassword()); expected != "" {
+			expectedToken = expected
+		}
 		if expectedToken == "" {
 			expectedToken = os.Getenv("BEARER_TOKEN")
 		}
