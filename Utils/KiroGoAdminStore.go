@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type KiroGoAccountMeta struct {
@@ -83,7 +85,11 @@ func defaultKiroGoAdminStore() KiroGoAdminStore {
 		pwd = strings.TrimSpace(os.Getenv("BEARER_TOKEN"))
 	}
 	if pwd == "" {
-		pwd = "changeme"
+		pwd = uuid.NewString()
+		_ = os.Setenv("ADMIN_TOKEN", pwd)
+		if NormalLogger != nil {
+			NormalLogger.Printf("Kiro-Go admin bootstrap password generated: %s\n", pwd)
+		}
 	}
 	return KiroGoAdminStore{
 		Password:             pwd,

@@ -28,8 +28,9 @@ type IamSsoSession struct {
 }
 
 var (
-	sessions   = make(map[string]*IamSsoSession)
-	sessionsMu sync.RWMutex
+	sessions       = make(map[string]*IamSsoSession)
+	sessionsMu     sync.RWMutex
+	iamCleanupOnce sync.Once
 )
 
 var scopes = []string{
@@ -42,15 +43,20 @@ var scopes = []string{
 
 // StartIamSsoLogin 发起 IAM SSO 登录
 func StartIamSsoLogin(startUrl, region string) (sessionID, authorizeUrl string, expiresIn int, err error) {
-	if region == "" {
-		region = "us-east-1"
+	normalizedRegion, err := normalizeRegion(region)
+	if err != nil {
+		return "", "", 0, err
+	}
+	validStartURL, err := validateStartURL(startUrl)
+	if err != nil {
+		return "", "", 0, err
 	}
 
-	oidcBase := fmt.Sprintf("https://oidc.%s.amazonaws.com", region)
+	oidcBase := fmt.Sprintf("https://oidc.%s.amazonaws.com", normalizedRegion)
 	redirectUri := "http://127.0.0.1/oauth/callback"
 
 	// 1. 注册 OIDC 客户端
-	clientID, clientSecret, err := registerOIDCClient(oidcBase, startUrl, redirectUri)
+	clientID, clientSecret, err := registerOIDCClient(oidcBase, validStartURL, redirectUri)
 	if err != nil {
 		return "", "", 0, fmt.Errorf("注册客户端失败: %w", err)
 	}
@@ -79,8 +85,8 @@ func StartIamSsoLogin(startUrl, region string) (sessionID, authorizeUrl string, 
 		ClientSecret: clientSecret,
 		CodeVerifier: codeVerifier,
 		State:        state,
-		Region:       region,
-		StartUrl:     startUrl,
+		Region:       normalizedRegion,
+		StartUrl:     validStartURL,
 		RedirectUri:  redirectUri,
 		ExpiresAt:    time.Now().Add(10 * time.Minute),
 	}
@@ -89,8 +95,7 @@ func StartIamSsoLogin(startUrl, region string) (sessionID, authorizeUrl string, 
 	sessions[sessionID] = session
 	sessionsMu.Unlock()
 
-	// 清理过期会话
-	go cleanupExpiredSessions()
+	startIamCleanupLoop()
 
 	return sessionID, authorizeUrl, 600, nil
 }
@@ -262,4 +267,16 @@ func cleanupExpiredSessions() {
 			delete(sessions, id)
 		}
 	}
+}
+
+func startIamCleanupLoop() {
+	iamCleanupOnce.Do(func() {
+		go func() {
+			ticker := time.NewTicker(5 * time.Minute)
+			defer ticker.Stop()
+			for range ticker.C {
+				cleanupExpiredSessions()
+			}
+		}()
+	})
 }

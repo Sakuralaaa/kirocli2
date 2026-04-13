@@ -24,17 +24,19 @@ type BuilderIdSession struct {
 }
 
 var (
-	builderIdSessions = make(map[string]*BuilderIdSession)
-	builderIdMu       sync.RWMutex
+	builderIdSessions  = make(map[string]*BuilderIdSession)
+	builderIdMu        sync.RWMutex
+	builderCleanupOnce sync.Once
 )
 
 // StartBuilderIdLogin 开始 Builder ID 登录
 func StartBuilderIdLogin(region string) (*BuilderIdSession, error) {
-	if region == "" {
-		region = "us-east-1"
+	normalizedRegion, err := normalizeRegion(region)
+	if err != nil {
+		return nil, err
 	}
 
-	oidcBase := fmt.Sprintf("https://oidc.%s.amazonaws.com", region)
+	oidcBase := fmt.Sprintf("https://oidc.%s.amazonaws.com", normalizedRegion)
 	startUrl := "https://view.awsapps.com/start"
 	scopes := []string{
 		"codewhisperer:completions",
@@ -132,15 +134,14 @@ func StartBuilderIdLogin(region string) (*BuilderIdSession, error) {
 		VerificationUri: verificationUri,
 		Interval:        authResult.Interval,
 		ExpiresAt:       time.Now().Add(time.Duration(authResult.ExpiresIn) * time.Second),
-		Region:          region,
+		Region:          normalizedRegion,
 	}
 
 	builderIdMu.Lock()
 	builderIdSessions[session.ID] = session
 	builderIdMu.Unlock()
 
-	// 清理过期会话
-	go cleanupExpiredBuilderIdSessions()
+	startBuilderIdCleanupLoop()
 
 	return session, nil
 }
@@ -253,4 +254,16 @@ func cleanupExpiredBuilderIdSessions() {
 			delete(builderIdSessions, id)
 		}
 	}
+}
+
+func startBuilderIdCleanupLoop() {
+	builderCleanupOnce.Do(func() {
+		go func() {
+			ticker := time.NewTicker(5 * time.Minute)
+			defer ticker.Stop()
+			for range ticker.C {
+				cleanupExpiredBuilderIdSessions()
+			}
+		}()
+	})
 }

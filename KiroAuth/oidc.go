@@ -28,11 +28,12 @@ func refreshOIDCToken(refreshToken, clientID, clientSecret, region string) (stri
 	if clientID == "" || clientSecret == "" {
 		return "", "", 0, fmt.Errorf("OIDC refresh requires clientId and clientSecret")
 	}
-	if region == "" {
-		region = "us-east-1"
+	normalizedRegion, err := normalizeRegion(region)
+	if err != nil {
+		return "", "", 0, err
 	}
 
-	url := fmt.Sprintf("https://oidc.%s.amazonaws.com/token", region)
+	url := fmt.Sprintf("https://oidc.%s.amazonaws.com/token", normalizedRegion)
 	payload := map[string]string{
 		"clientId":     clientID,
 		"clientSecret": clientSecret,

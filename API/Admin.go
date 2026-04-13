@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -16,7 +17,12 @@ import (
 	"kilocli2api/Utils"
 )
 
-const kiroGoVersion = "1.0.3"
+func kiroGoVersion() string {
+	if v := strings.TrimSpace(os.Getenv("KIROGO_VERSION")); v != "" {
+		return v
+	}
+	return "1.0.3"
+}
 
 type kiroGoAccountRequest struct {
 	ID           string `json:"id"`
@@ -41,12 +47,32 @@ func AdminPanel(c *gin.Context) {
 }
 
 func AdminStatic(c *gin.Context) {
-	path := strings.TrimPrefix(c.Param("filepath"), "/")
-	if path == "" {
+	cleaned := filepath.Clean("/" + strings.TrimSpace(c.Param("filepath")))
+	rel := strings.TrimPrefix(cleaned, "/")
+	if rel == "." || rel == "" {
 		c.File("web/index.html")
 		return
 	}
-	c.File("web/" + path)
+	allowedExt := map[string]bool{
+		".html": true, ".css": true, ".js": true, ".json": true,
+		".png": true, ".jpg": true, ".jpeg": true, ".svg": true, ".ico": true, ".map": true,
+	}
+	if ext := strings.ToLower(filepath.Ext(rel)); ext != "" && !allowedExt[ext] {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid static file type"})
+		return
+	}
+	target := filepath.Join("web", rel)
+	relativeToRoot, err := filepath.Rel("web", target)
+	if err != nil || strings.HasPrefix(relativeToRoot, "..") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid static path"})
+		return
+	}
+	info, err := os.Stat(target)
+	if err != nil || info.IsDir() {
+		c.JSON(http.StatusNotFound, gin.H{"error": "static file not found"})
+		return
+	}
+	c.File(target)
 }
 
 func AdminStatus(c *gin.Context) {
@@ -493,7 +519,7 @@ func AdminUpdateEndpoint(c *gin.Context) {
 }
 
 func AdminVersion(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"version": kiroGoVersion})
+	c.JSON(http.StatusOK, gin.H{"version": kiroGoVersion()})
 }
 
 func AdminExportAccounts(c *gin.Context) {
@@ -579,7 +605,7 @@ func AdminExportAccounts(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"version":    kiroGoVersion,
+		"version":    kiroGoVersion(),
 		"exportedAt": time.Now().UnixMilli(),
 		"accounts":   out,
 		"groups":     []interface{}{},
