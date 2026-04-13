@@ -34,7 +34,7 @@ func AdminAuth() gin.HandlerFunc {
 		}
 
 		if token == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "x-admin-token / X-Admin-Password or Authorization header required"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "x-admin-token, X-Admin-Password, or Authorization Bearer header required"})
 			c.Abort()
 			return
 		}

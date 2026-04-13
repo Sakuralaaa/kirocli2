@@ -511,12 +511,31 @@ const adminPanelHTML = `<!DOCTYPE html>
         if (!Number.isFinite(accountID) || accountID <= 0) return;
         const tr = document.createElement("tr");
         const expiresDisplay = a.expires_at ? new Date(a.expires_at * 1000).toLocaleString() : "-";
-        tr.innerHTML = "<td>" + accountID + "</td>" +
-          "<td>" + (a.client_id || "") + "</td>" +
-          "<td>" + (a.refresh_token_preview || "") + "</td>" +
-          "<td>" + (a.disabled ? "禁用" : (a.active ? "活跃" : "待激活")) + "</td>" +
-          "<td>" + expiresDisplay + "</td>" +
-          "<td><button class='btn gray' onclick='toggleAccount(" + accountID + "," + (a.disabled ? "true" : "false") + ")'>切换启用</button> <button class='btn gray' onclick='deleteAccount(" + accountID + ")'>删除</button></td>";
+        const values = [
+          String(accountID),
+          a.client_id || "",
+          a.refresh_token_preview || "",
+          a.disabled ? "禁用" : (a.active ? "活跃" : "待激活"),
+          expiresDisplay
+        ];
+        values.forEach((value) => {
+          const td = document.createElement("td");
+          td.textContent = value;
+          tr.appendChild(td);
+        });
+        const actionTd = document.createElement("td");
+        const toggleBtn = document.createElement("button");
+        toggleBtn.className = "btn gray";
+        toggleBtn.textContent = "切换启用";
+        toggleBtn.onclick = () => toggleAccount(accountID, !!a.disabled);
+        const deleteBtn = document.createElement("button");
+        deleteBtn.className = "btn gray";
+        deleteBtn.style.marginLeft = "6px";
+        deleteBtn.textContent = "删除";
+        deleteBtn.onclick = () => deleteAccount(accountID);
+        actionTd.appendChild(toggleBtn);
+        actionTd.appendChild(deleteBtn);
+        tr.appendChild(actionTd);
         tbody.appendChild(tr);
       });
     }
