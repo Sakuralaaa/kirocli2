@@ -33,7 +33,7 @@ func RefreshToken(input RefreshInput) (string, string, int64, error) {
 			if oidcErr == nil {
 				return oidcAccess, oidcRefresh, oidcExpires, nil
 			}
-			return "", "", 0, fmt.Errorf("Social refresh failed: %v; attempted OIDC fallback but also failed: %v", err, oidcErr)
+			return "", "", 0, fmt.Errorf("social refresh failed: %v; attempted OIDC fallback but also failed: %v", err, oidcErr)
 		}
 		// Missing OIDC client credentials: keep original social refresh error.
 		return "", "", 0, err
@@ -46,7 +46,7 @@ func RefreshToken(input RefreshInput) (string, string, int64, error) {
 	if socialErr == nil {
 		return socialAccess, socialRefresh, socialExpires, nil
 	}
-	return "", "", 0, fmt.Errorf("OIDC refresh failed: %v; attempted Social fallback but also failed: %v", err, socialErr)
+	return "", "", 0, fmt.Errorf("OIDC refresh failed: %v; attempted social fallback but also failed: %v", err, socialErr)
 }
 
 func refreshOIDCToken(refreshToken, clientID, clientSecret, region string) (string, string, int64, error) {
