@@ -3,6 +3,8 @@ package main
 import (
 	"kilocli2api/API"
 	"kilocli2api/Middleware"
+	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -58,5 +60,16 @@ func setupRouter(r *gin.Engine) {
 		admin.POST("/export", API.AdminExportAccounts)
 	}
 
-	r.NoRoute(API.NotFound)
+	r.NoRoute(func(c *gin.Context) {
+		path := c.Request.URL.Path
+		if c.Request.Method == http.MethodGet &&
+			strings.HasPrefix(path, "/admin/") &&
+			path != "/admin/api" &&
+			!strings.HasPrefix(path, "/admin/api/") {
+			c.AddParam("filepath", strings.TrimPrefix(path, "/admin"))
+			API.AdminStatic(c)
+			return
+		}
+		API.NotFound(c)
+	})
 }
