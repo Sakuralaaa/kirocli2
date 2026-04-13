@@ -507,14 +507,16 @@ const adminPanelHTML = `<!DOCTYPE html>
       const tbody = document.getElementById("accounts_tbody");
       tbody.innerHTML = "";
       accounts.forEach((a) => {
+        const accountID = Number(a.id);
+        if (!Number.isFinite(accountID) || accountID <= 0) return;
         const tr = document.createElement("tr");
-        const expires = a.expires_at ? new Date(a.expires_at * 1000).toLocaleString() : "-";
-        tr.innerHTML = "<td>" + a.id + "</td>" +
+        const expiresDisplay = a.expires_at ? new Date(a.expires_at * 1000).toLocaleString() : "-";
+        tr.innerHTML = "<td>" + accountID + "</td>" +
           "<td>" + (a.client_id || "") + "</td>" +
           "<td>" + (a.refresh_token_preview || "") + "</td>" +
           "<td>" + (a.disabled ? "禁用" : (a.active ? "活跃" : "待激活")) + "</td>" +
-          "<td>" + expires + "</td>" +
-          "<td><button class='btn gray' onclick='toggleAccount(" + a.id + "," + (a.disabled ? "true" : "false") + ")'>切换启用</button> <button class='btn gray' onclick='deleteAccount(" + a.id + ")'>删除</button></td>";
+          "<td>" + expiresDisplay + "</td>" +
+          "<td><button class='btn gray' onclick='toggleAccount(" + accountID + "," + (a.disabled ? "true" : "false") + ")'>切换启用</button> <button class='btn gray' onclick='deleteAccount(" + accountID + ")'>删除</button></td>";
         tbody.appendChild(tr);
       });
     }

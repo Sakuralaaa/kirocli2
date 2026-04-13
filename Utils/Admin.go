@@ -171,48 +171,42 @@ func ensureAccountIDsLocked() bool {
 	return changed
 }
 
-func persistAllAccountsLocked() error {
-	if csvPath != "" {
-		csvMutex.Lock()
-		defer csvMutex.Unlock()
-
-		header := []string{"enabled", "refresh_token", "client_id", "client_secret"}
-		if data, err := os.ReadFile(csvPath); err == nil {
-			lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
-			if len(lines) > 0 && strings.TrimSpace(lines[0]) != "" {
-				parts := strings.Split(lines[0], ",")
-				if len(parts) >= 4 {
-					header = parts
-				}
+func persistAllAccountsToCSVLocked() error {
+	header := []string{"enabled", "refresh_token", "client_id", "client_secret"}
+	if data, err := os.ReadFile(csvPath); err == nil {
+		lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
+		if len(lines) > 0 && strings.TrimSpace(lines[0]) != "" {
+			parts := strings.Split(lines[0], ",")
+			if len(parts) >= 4 {
+				header = parts
 			}
 		}
-
-		file, err := os.OpenFile(csvPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
-		if err != nil {
-			return err
-		}
-		defer file.Close()
-
-		w := csv.NewWriter(file)
-		if err := w.Write(header); err != nil {
-			return err
-		}
-		for _, item := range RefreshTokens {
-			enabled := "True"
-			if item.Disabled {
-				enabled = "False"
-			}
-			if err := w.Write([]string{enabled, item.Token, item.ClientId, item.ClientSecret}); err != nil {
-				return err
-			}
-		}
-		w.Flush()
-		return w.Error()
 	}
 
-	csvMutex.Lock()
-	defer csvMutex.Unlock()
+	file, err := os.OpenFile(csvPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
 
+	w := csv.NewWriter(file)
+	if err := w.Write(header); err != nil {
+		return err
+	}
+	for _, item := range RefreshTokens {
+		enabled := "True"
+		if item.Disabled {
+			enabled = "False"
+		}
+		if err := w.Write([]string{enabled, item.Token, item.ClientId, item.ClientSecret}); err != nil {
+			return err
+		}
+	}
+	w.Flush()
+	return w.Error()
+}
+
+func persistAllAccountsToJSONLocked() error {
 	accounts := make([]APIAccount, 0, len(RefreshTokens))
 	for _, item := range RefreshTokens {
 		accounts = append(accounts, APIAccount{
@@ -223,6 +217,13 @@ func persistAllAccountsLocked() error {
 		})
 	}
 	return saveAPIAccountsToJSON(accounts)
+}
+
+func persistAllAccountsLocked() error {
+	if csvPath != "" {
+		return persistAllAccountsToCSVLocked()
+	}
+	return persistAllAccountsToJSONLocked()
 }
 
 func removeActiveTokenIndexLocked(target int) {
