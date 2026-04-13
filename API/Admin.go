@@ -508,8 +508,16 @@ const adminPanelHTML = `<!DOCTYPE html>
       tbody.innerHTML = "";
       accounts.forEach((a) => {
         const accountID = Number(a.id);
-        if (!Number.isFinite(accountID) || accountID <= 0) return;
         const tr = document.createElement("tr");
+        if (!Number.isFinite(accountID) || accountID <= 0) {
+          const warnTd = document.createElement("td");
+          warnTd.colSpan = 6;
+          warnTd.className = "bad";
+          warnTd.textContent = "检测到无效账号 ID，无法管理该条目（原始ID: " + String(a.id) + "）";
+          tr.appendChild(warnTd);
+          tbody.appendChild(tr);
+          return;
+        }
         const expiresDisplay = a.expires_at ? new Date(a.expires_at * 1000).toLocaleString() : "-";
         const values = [
           String(accountID),
