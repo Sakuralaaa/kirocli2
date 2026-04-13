@@ -79,14 +79,33 @@ go run .
 
 - 页面：`GET /admin`
 - 状态：`GET /admin/api/status`
+- 账号列表：`GET /admin/api/accounts`
 - 手动录入账号：`POST /admin/api/accounts`
+- 批量录入账号：`POST /admin/api/accounts/batch`
+- 更新账号：`PUT /admin/api/accounts/:id`
+- 删除账号：`DELETE /admin/api/accounts/:id`
+- 刷新单账号：`POST /admin/api/accounts/:id/refresh`
+- 单账号模型：`GET /admin/api/accounts/:id/models`
+- 单账号完整信息：`GET /admin/api/accounts/:id/full`
+- 认证导入（BuilderID）：`POST /admin/api/auth/builderid/start`、`POST /admin/api/auth/builderid/poll`
+- 认证导入（IAM SSO）：`POST /admin/api/auth/iam-sso/start`、`POST /admin/api/auth/iam-sso/complete`
+- 认证导入（SSO Token）：`POST /admin/api/auth/sso-token`
+- 认证导入（Credentials）：`POST /admin/api/auth/credentials`
 - 手动测试账号：`POST /admin/api/accounts/test`
 - 手动刷新活跃 token：`POST /admin/api/tokens/refresh`
 - 运行时更新配置：`POST /admin/api/config`
+- 设置读取/更新：`GET /admin/api/settings`、`POST /admin/api/settings`
+- 统计信息：`GET /admin/api/stats`、`POST /admin/api/stats/reset`
+- Thinking 配置：`GET /admin/api/thinking`、`POST /admin/api/thinking`
+- 端点配置：`GET /admin/api/endpoint`、`POST /admin/api/endpoint`
+- 机器码生成：`GET /admin/api/generate-machine-id`
+- 版本信息：`GET /admin/api/version`
+- 账号导出：`POST /admin/api/export`
 
 鉴权方式（适用于 `/admin/api/*` 请求）：
 
 - 请求头 `x-admin-token: <ADMIN_TOKEN>`
+- 或 `X-Admin-Password: <ADMIN_TOKEN>`
 - 或 `Authorization: Bearer <ADMIN_TOKEN>`
 
 若未设置 `ADMIN_TOKEN`，默认使用 `BEARER_TOKEN` 作为管理口令；若二者都没设置，则请使用启动日志里的 `Bootstrap admin token`。

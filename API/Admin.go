@@ -1,159 +1,982 @@
 package API
 
 import (
+	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
-	"kilocli2api/Models"
+	"github.com/google/uuid"
+
+	"kilocli2api/KiroAuth"
 	"kilocli2api/Utils"
 )
 
-type adminConfigRequest struct {
-	BearerToken       *string `json:"bearer_token"`
-	AdminToken        *string `json:"admin_token"`
-	OIDCURL           *string `json:"oidc_url"`
-	AmazonQURL        *string `json:"amazon_q_url"`
-	ProxyURL          *string `json:"proxy_url"`
-	AccountSource     *string `json:"account_source"`
-	AccountsCSVPath   *string `json:"accounts_csv_path"`
-	AccountAPIURL     *string `json:"account_api_url"`
-	AccountAPIToken   *string `json:"account_api_token"`
-	AccountCategoryID *string `json:"account_category_id"`
-	ActiveTokenCount  *string `json:"active_token_count"`
-	MaxRefreshAttempt *string `json:"max_refresh_attempt"`
+func kiroGoVersion() string {
+	if v := strings.TrimSpace(os.Getenv("KIROGO_VERSION")); v != "" {
+		return v
+	}
+	return "1.0.3"
 }
 
-type addAccountRequest struct {
-	RefreshToken string `json:"refresh_token"`
-	ClientID     string `json:"client_id"`
-	ClientSecret string `json:"client_secret"`
-	Activate     bool   `json:"activate"`
-}
-
-func envOrDefault(key, fallback string) string {
-	v := strings.TrimSpace(os.Getenv(key))
-	if v == "" {
-		return fallback
-	}
-	return v
-}
-
-func maskSecret(raw string) string {
-	if raw == "" {
-		return ""
-	}
-	if len(raw) <= 8 {
-		return "****"
-	}
-	return raw[:4] + "..." + raw[len(raw)-4:]
+type kiroGoAccountRequest struct {
+	ID           string `json:"id"`
+	Email        string `json:"email"`
+	UserID       string `json:"userId"`
+	Nickname     string `json:"nickname"`
+	AccessToken  string `json:"accessToken"`
+	RefreshToken string `json:"refreshToken"`
+	ClientID     string `json:"clientId"`
+	ClientSecret string `json:"clientSecret"`
+	AuthMethod   string `json:"authMethod"`
+	Provider     string `json:"provider"`
+	Region       string `json:"region"`
+	ExpiresAt    int64  `json:"expiresAt"`
+	MachineID    string `json:"machineId"`
+	Enabled      *bool  `json:"enabled"`
+	Weight       int    `json:"weight"`
 }
 
 func AdminPanel(c *gin.Context) {
-	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(adminPanelHTML))
+	c.File("web/index.html")
+}
+
+func AdminStatic(c *gin.Context) {
+	cleaned := filepath.Clean("/" + strings.TrimSpace(c.Param("filepath")))
+	rel := strings.TrimPrefix(cleaned, "/")
+	if rel == "." || rel == "" {
+		c.File("web/index.html")
+		return
+	}
+	allowedExt := map[string]bool{
+		".html": true, ".css": true, ".js": true, ".json": true,
+		".png": true, ".jpg": true, ".jpeg": true, ".svg": true, ".ico": true, ".map": true,
+	}
+	if ext := strings.ToLower(filepath.Ext(rel)); ext != "" && !allowedExt[ext] {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid static file type"})
+		return
+	}
+	target := filepath.Join("web", rel)
+	relativeToRoot, err := filepath.Rel("web", target)
+	if err != nil || strings.HasPrefix(relativeToRoot, "..") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid static path"})
+		return
+	}
+	info, err := os.Stat(target)
+	if err != nil || info.IsDir() {
+		c.JSON(http.StatusNotFound, gin.H{"error": "static file not found"})
+		return
+	}
+	c.File(target)
 }
 
 func AdminStatus(c *gin.Context) {
 	snapshot := Utils.GetAdminSnapshot()
+	store := Utils.GetKiroGoAdminStore()
+	stats := Utils.KiroGoStatsSnapshot()
+
 	c.JSON(http.StatusOK, gin.H{
-		"snapshot": snapshot,
-		"runtime_config": gin.H{
-			"port":                envOrDefault("PORT", "4000"),
-			"gin_mode":            envOrDefault("GIN_MODE", "release"),
-			"account_source":      envOrDefault("ACCOUNT_SOURCE", "manual"),
-			"accounts_csv_path":   os.Getenv("ACCOUNTS_CSV_PATH"),
-			"oidc_url":            os.Getenv("OIDC_URL"),
-			"amazon_q_url":        os.Getenv("AMAZON_Q_URL"),
-			"proxy_url":           os.Getenv("PROXY_URL"),
-			"account_api_url":     os.Getenv("ACCOUNT_API_URL"),
-			"account_api_token":   maskSecret(os.Getenv("ACCOUNT_API_TOKEN")),
-			"account_category_id": envOrDefault("ACCOUNT_CATEGORY_ID", "3"),
-			"active_token_count":  envOrDefault("ACTIVE_TOKEN_COUNT", "10"),
-			"max_refresh_attempt": envOrDefault("MAX_REFRESH_ATTEMPT", "3"),
-			"bearer_token":        maskSecret(os.Getenv("BEARER_TOKEN")),
-			"admin_token":         maskSecret(envOrDefault("ADMIN_TOKEN", os.Getenv("BEARER_TOKEN"))),
-		},
+		"accounts":        snapshot.TotalAccounts,
+		"available":       snapshot.ActiveAccountCount,
+		"totalRequests":   stats["totalRequests"],
+		"successRequests": stats["successRequests"],
+		"failedRequests":  stats["failedRequests"],
+		"totalTokens":     stats["totalTokens"],
+		"totalCredits":    stats["totalCredits"],
+		"uptime":          stats["uptime"],
+		"requireApiKey":   store.RequireAPIKey,
 	})
 }
 
-func AdminSetRuntimeConfig(c *gin.Context) {
-	var req adminConfigRequest
+func accountIDFromPath(c *gin.Context) (int, error) {
+	id, err := Utils.ParseAccountID(c.Param("id"))
+	if err == nil {
+		return id, nil
+	}
+	return 0, errors.New("invalid account id")
+}
+
+func accountMetaFromRequest(id int, req kiroGoAccountRequest) Utils.KiroGoAccountMeta {
+	enabled := true
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+	region := req.Region
+	if strings.TrimSpace(region) == "" {
+		region = "us-east-1"
+	}
+	machineID := strings.TrimSpace(req.MachineID)
+	if machineID == "" {
+		machineID = uuid.NewString()
+	}
+	authMethod := strings.TrimSpace(req.AuthMethod)
+	if authMethod == "" {
+		if strings.TrimSpace(req.ClientID) != "" {
+			authMethod = "idc"
+		} else {
+			authMethod = "social"
+		}
+	}
+
+	return Utils.KiroGoAccountMeta{
+		ID:         id,
+		Email:      strings.TrimSpace(req.Email),
+		UserID:     strings.TrimSpace(req.UserID),
+		Nickname:   strings.TrimSpace(req.Nickname),
+		AuthMethod: authMethod,
+		Provider:   strings.TrimSpace(req.Provider),
+		Region:     region,
+		Enabled:    enabled,
+		MachineID:  machineID,
+		Weight:     req.Weight,
+	}
+}
+
+func addOrImportAccount(req kiroGoAccountRequest) (int, error) {
+	enabled := true
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+
+	refreshToken := strings.TrimSpace(req.RefreshToken)
+	clientID := strings.TrimSpace(req.ClientID)
+	clientSecret := strings.TrimSpace(req.ClientSecret)
+	if refreshToken == "" {
+		return 0, errors.New("refreshToken is required")
+	}
+
+	added, err := Utils.AddImportedAccountWithAccessToken(refreshToken, clientID, clientSecret, strings.TrimSpace(req.AccessToken), req.ExpiresAt, enabled)
+	if err != nil {
+		return 0, err
+	}
+
+	meta := accountMetaFromRequest(added.ID, req)
+	if err := Utils.UpsertKiroGoAccountMeta(meta); err != nil {
+		return 0, err
+	}
+	return added.ID, nil
+}
+
+func AdminGetAccounts(c *gin.Context) {
+	snapshots := Utils.ListAdminAccounts()
+	metas := Utils.ListKiroGoAccountMetas()
+	metaMap := map[int]Utils.KiroGoAccountMeta{}
+	for _, m := range metas {
+		metaMap[m.ID] = m
+	}
+
+	result := make([]gin.H, 0, len(snapshots))
+	for _, s := range snapshots {
+		m, ok := metaMap[s.ID]
+		if !ok {
+			m = Utils.KiroGoAccountMeta{ID: s.ID, Enabled: !s.Disabled, Region: "us-east-1", AuthMethod: "idc", MachineID: uuid.NewString()}
+			_ = Utils.UpsertKiroGoAccountMeta(m)
+		}
+		result = append(result, gin.H{
+			"id":                strconv.Itoa(s.ID),
+			"email":             m.Email,
+			"userId":            m.UserID,
+			"nickname":          m.Nickname,
+			"authMethod":        m.AuthMethod,
+			"provider":          m.Provider,
+			"region":            m.Region,
+			"enabled":           !s.Disabled,
+			"banStatus":         m.BanStatus,
+			"banReason":         m.BanReason,
+			"banTime":           m.BanTime,
+			"expiresAt":         s.ExpiresAt,
+			"hasToken":          s.ExpiresAt > time.Now().Unix(),
+			"machineId":         m.MachineID,
+			"weight":            m.Weight,
+			"subscriptionType":  m.SubscriptionType,
+			"subscriptionTitle": m.SubscriptionTitle,
+			"daysRemaining":     m.DaysRemaining,
+			"usageCurrent":      m.UsageCurrent,
+			"usageLimit":        m.UsageLimit,
+			"usagePercent":      m.UsagePercent,
+			"nextResetDate":     m.NextResetDate,
+			"lastRefresh":       m.LastRefresh,
+			"trialUsageCurrent": m.TrialUsageCurrent,
+			"trialUsageLimit":   m.TrialUsageLimit,
+			"trialUsagePercent": m.TrialUsagePercent,
+			"trialStatus":       m.TrialStatus,
+			"trialExpiresAt":    m.TrialExpiresAt,
+			"requestCount":      m.RequestCount,
+			"errorCount":        m.ErrorCount,
+			"totalTokens":       m.TotalTokens,
+			"totalCredits":      m.TotalCredits,
+			"lastUsed":          m.LastUsed,
+		})
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+func AdminAddAccount(c *gin.Context) {
+	var req kiroGoAccountRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON"})
+		return
+	}
+
+	id, err := addOrImportAccount(req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "id": strconv.Itoa(id)})
+}
+
+func AdminDeleteAccount(c *gin.Context) {
+	id, err := accountIDFromPath(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := Utils.DeleteAccountByID(id); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	_ = Utils.DeleteKiroGoAccountMeta(id)
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+func AdminUpdateAccount(c *gin.Context) {
+	id, err := accountIDFromPath(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var req map[string]interface{}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON"})
+		return
+	}
+
+	var enabled *bool
+	if v, ok := req["enabled"].(bool); ok {
+		enabled = &v
+	}
+
+	_, updErr := Utils.UpdateAccountByID(id, enabled, nil, nil, nil)
+	if updErr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": updErr.Error()})
+		return
+	}
+
+	meta, ok := Utils.GetKiroGoAccountMeta(id)
+	if !ok {
+		meta = Utils.KiroGoAccountMeta{ID: id, Enabled: enabled == nil || *enabled, Region: "us-east-1", AuthMethod: "idc", MachineID: uuid.NewString()}
+	}
+	if enabled != nil {
+		meta.Enabled = *enabled
+	}
+	if v, ok := req["nickname"].(string); ok {
+		meta.Nickname = strings.TrimSpace(v)
+	}
+	if v, ok := req["machineId"].(string); ok {
+		meta.MachineID = strings.TrimSpace(v)
+	}
+	if v, ok := req["weight"].(float64); ok {
+		meta.Weight = int(v)
+	}
+
+	_ = Utils.UpsertKiroGoAccountMeta(meta)
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+func AdminBatchAccounts(c *gin.Context) {
+	var req struct {
+		IDs    []string `json:"ids"`
+		Action string   `json:"action"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON"})
+		return
+	}
+	if len(req.IDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No account IDs provided"})
+		return
+	}
+
+	switch req.Action {
+	case "enable", "disable":
+		target := req.Action == "enable"
+		count := 0
+		for _, raw := range req.IDs {
+			id, err := Utils.ParseAccountID(raw)
+			if err != nil {
+				continue
+			}
+			if _, err := Utils.UpdateAccountByID(id, &target, nil, nil, nil); err == nil {
+				meta, ok := Utils.GetKiroGoAccountMeta(id)
+				if !ok {
+					meta = Utils.KiroGoAccountMeta{ID: id, Enabled: target, Region: "us-east-1", AuthMethod: "idc", MachineID: uuid.NewString()}
+				}
+				meta.Enabled = target
+				_ = Utils.UpsertKiroGoAccountMeta(meta)
+				count++
+			}
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "count": count})
+	case "refresh":
+		refreshed := 0
+		failed := 0
+		for _, raw := range req.IDs {
+			id, err := Utils.ParseAccountID(raw)
+			if err != nil {
+				failed++
+				continue
+			}
+			account, _, ok := Utils.GetAccountTokenStateByID(id)
+			if !ok {
+				failed++
+				continue
+			}
+			token, err := Utils.GetAccessTokenFromRefreshToken(account)
+			if err != nil {
+				failed++
+				continue
+			}
+			_ = Utils.SetAccountTokenByID(id, token.Token, token.ExpiresAt)
+			refreshed++
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "refreshed": refreshed, "failed": failed})
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid action: " + req.Action})
+	}
+}
+
+func AdminRefreshAccount(c *gin.Context) {
+	id, err := accountIDFromPath(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	account, _, ok := Utils.GetAccountTokenStateByID(id)
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Account not found"})
+		return
+	}
+	token, err := Utils.GetAccessTokenFromRefreshToken(account)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	_ = Utils.SetAccountTokenByID(id, token.Token, token.ExpiresAt)
+	c.JSON(http.StatusOK, gin.H{"success": true, "info": gin.H{"expiresAt": token.ExpiresAt}})
+}
+
+func AdminGetAccountFull(c *gin.Context) {
+	id, err := accountIDFromPath(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	account, active, ok := Utils.GetAccountTokenStateByID(id)
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Account not found"})
+		return
+	}
+	meta, _ := Utils.GetKiroGoAccountMeta(id)
+	c.JSON(http.StatusOK, gin.H{
+		"id":           strconv.Itoa(id),
+		"email":        meta.Email,
+		"userId":       meta.UserID,
+		"nickname":     meta.Nickname,
+		"accessToken":  account.AccessToken.Token,
+		"refreshToken": account.Token,
+		"clientId":     account.ClientId,
+		"clientSecret": account.ClientSecret,
+		"authMethod":   meta.AuthMethod,
+		"provider":     meta.Provider,
+		"region":       meta.Region,
+		"expiresAt":    account.AccessToken.ExpiresAt,
+		"machineId":    meta.MachineID,
+		"enabled":      !account.Disabled,
+		"active":       active,
+		"weight":       meta.Weight,
+	})
+}
+
+func AdminGetAccountModels(c *gin.Context) {
+	qModels, err := fetchQModels()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	models := make([]gin.H, 0, len(qModels.Models))
+	for _, item := range qModels.Models {
+		models = append(models, gin.H{"id": item.ModelID, "name": item.ModelName})
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "models": models})
+}
+
+func AdminGenerateMachineID(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"machineId": uuid.NewString()})
+}
+
+func AdminGetSettings(c *gin.Context) {
+	store := Utils.GetKiroGoAdminStore()
+	c.JSON(http.StatusOK, gin.H{
+		"apiKey":        store.APIKey,
+		"requireApiKey": store.RequireAPIKey,
+		"port":          os.Getenv("PORT"),
+		"host":          "0.0.0.0",
+	})
+}
+
+func AdminUpdateSettings(c *gin.Context) {
+	var req struct {
+		APIKey        *string `json:"apiKey"`
+		RequireAPIKey *bool   `json:"requireApiKey"`
+		Password      *string `json:"password"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON"})
+		return
+	}
+	if err := Utils.UpdateKiroGoAdminSettings(req.APIKey, req.RequireAPIKey, req.Password); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if req.Password != nil {
+		_ = Utils.SaveRuntimeConfigFromEnv()
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+func AdminGetStats(c *gin.Context) {
+	c.JSON(http.StatusOK, Utils.KiroGoStatsSnapshot())
+}
+
+func AdminResetStats(c *gin.Context) {
+	if err := Utils.ResetKiroGoStats(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+func AdminGetThinkingConfig(c *gin.Context) {
+	cfg := Utils.GetKiroGoThinkingConfig()
+	c.JSON(http.StatusOK, gin.H{"suffix": cfg.Suffix, "openaiFormat": cfg.OpenAIFormat, "claudeFormat": cfg.ClaudeFormat})
+}
+
+func AdminUpdateThinkingConfig(c *gin.Context) {
+	var req struct {
+		Suffix       string `json:"suffix"`
+		OpenAIFormat string `json:"openaiFormat"`
+		ClaudeFormat string `json:"claudeFormat"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON"})
+		return
+	}
+	valid := map[string]bool{"reasoning_content": true, "thinking": true, "think": true}
+	if req.OpenAIFormat != "" && !valid[req.OpenAIFormat] {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid openaiFormat, must be: reasoning_content, thinking, or think"})
+		return
+	}
+	if req.ClaudeFormat != "" && !valid[req.ClaudeFormat] {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid claudeFormat, must be: reasoning_content, thinking, or think"})
+		return
+	}
+	if err := Utils.UpdateKiroGoThinkingConfig(req.Suffix, req.OpenAIFormat, req.ClaudeFormat); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+func AdminGetEndpoint(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"preferredEndpoint": Utils.GetKiroGoPreferredEndpoint()})
+}
+
+func AdminUpdateEndpoint(c *gin.Context) {
+	var req struct {
+		PreferredEndpoint string `json:"preferredEndpoint"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON"})
+		return
+	}
+	valid := map[string]bool{"auto": true, "codewhisperer": true, "amazonq": true}
+	if !valid[req.PreferredEndpoint] {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid endpoint, must be: auto, codewhisperer, or amazonq"})
+		return
+	}
+	if err := Utils.UpdateKiroGoPreferredEndpoint(req.PreferredEndpoint); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+func AdminVersion(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"version": kiroGoVersion()})
+}
+
+func AdminExportAccounts(c *gin.Context) {
+	var req struct {
+		IDs []string `json:"ids"`
+	}
+	_ = c.ShouldBindJSON(&req)
+
+	snapshots := Utils.ListAdminAccounts()
+	selected := map[string]bool{}
+	for _, id := range req.IDs {
+		selected[id] = true
+	}
+
+	type ExportCredentials struct {
+		AccessToken  string `json:"accessToken"`
+		CsrfToken    string `json:"csrfToken"`
+		RefreshToken string `json:"refreshToken"`
+		ClientID     string `json:"clientId,omitempty"`
+		ClientSecret string `json:"clientSecret,omitempty"`
+		Region       string `json:"region,omitempty"`
+		ExpiresAt    int64  `json:"expiresAt"`
+		AuthMethod   string `json:"authMethod,omitempty"`
+		Provider     string `json:"provider,omitempty"`
+	}
+	type ExportAccount struct {
+		ID          string            `json:"id"`
+		Email       string            `json:"email"`
+		Nickname    string            `json:"nickname,omitempty"`
+		Idp         string            `json:"idp"`
+		UserId      string            `json:"userId,omitempty"`
+		MachineId   string            `json:"machineId,omitempty"`
+		Credentials ExportCredentials `json:"credentials"`
+		Tags        []string          `json:"tags"`
+		Status      string            `json:"status"`
+		CreatedAt   int64             `json:"createdAt"`
+		LastUsedAt  int64             `json:"lastUsedAt"`
+	}
+
+	out := make([]ExportAccount, 0, len(snapshots))
+	for _, s := range snapshots {
+		sid := strconv.Itoa(s.ID)
+		if len(selected) > 0 && !selected[sid] {
+			continue
+		}
+		account, _, ok := Utils.GetAccountTokenStateByID(s.ID)
+		if !ok {
+			continue
+		}
+		meta, _ := Utils.GetKiroGoAccountMeta(s.ID)
+		idp := meta.Provider
+		if idp == "" {
+			if strings.EqualFold(meta.AuthMethod, "social") {
+				idp = "Google"
+			} else {
+				idp = "BuilderId"
+			}
+		}
+
+		out = append(out, ExportAccount{
+			ID:        sid,
+			Email:     meta.Email,
+			Nickname:  meta.Nickname,
+			Idp:       idp,
+			UserId:    meta.UserID,
+			MachineId: meta.MachineID,
+			Credentials: ExportCredentials{
+				AccessToken:  account.AccessToken.Token,
+				CsrfToken:    "",
+				RefreshToken: account.Token,
+				ClientID:     account.ClientId,
+				ClientSecret: account.ClientSecret,
+				Region:       meta.Region,
+				ExpiresAt:    account.AccessToken.ExpiresAt * 1000,
+				AuthMethod:   meta.AuthMethod,
+				Provider:     meta.Provider,
+			},
+			Tags:       []string{},
+			Status:     "active",
+			CreatedAt:  time.Now().UnixMilli(),
+			LastUsedAt: time.Now().UnixMilli(),
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"version":    kiroGoVersion(),
+		"exportedAt": time.Now().UnixMilli(),
+		"accounts":   out,
+		"groups":     []interface{}{},
+		"tags":       []interface{}{},
+	})
+}
+
+func AdminStartBuilderID(c *gin.Context) {
+	var req struct {
+		Region string `json:"region"`
+	}
+	_ = c.ShouldBindJSON(&req)
+	session, err := KiroAuth.StartBuilderIdLogin(req.Region)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"sessionId":       session.ID,
+		"userCode":        session.UserCode,
+		"verificationUri": session.VerificationUri,
+		"interval":        session.Interval,
+	})
+}
+
+func AdminPollBuilderID(c *gin.Context) {
+	var req struct {
+		SessionID string `json:"sessionId"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON"})
+		return
+	}
+
+	accessToken, refreshToken, clientID, clientSecret, region, expiresIn, status, err := KiroAuth.PollBuilderIdAuth(req.SessionID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "error": err.Error()})
+		return
+	}
+
+	if status == "pending" || status == "slow_down" {
+		interval := 5
+		if session := KiroAuth.GetBuilderIdSession(req.SessionID); session != nil {
+			interval = session.Interval
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "completed": false, "status": status, "interval": interval})
+		return
+	}
+
+	reqData := kiroGoAccountRequest{
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
+		AuthMethod:   "idc",
+		Provider:     "BuilderId",
+		Region:       region,
+		Enabled:      boolPtr(true),
+		ExpiresAt:    time.Now().Unix() + int64(expiresIn),
+	}
+	email, userID, _ := KiroAuth.GetUserInfo(accessToken)
+	reqData.Email = email
+	reqData.UserID = userID
+	reqData.MachineID = uuid.NewString()
+
+	id, addErr := addOrImportAccount(reqData)
+	if addErr != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": addErr.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "completed": true, "account": gin.H{"id": strconv.Itoa(id), "email": email}})
+}
+
+func boolPtr(v bool) *bool { return &v }
+
+func AdminStartIamSSO(c *gin.Context) {
+	var req struct {
+		StartURL string `json:"startUrl"`
+		Region   string `json:"region"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON"})
+		return
+	}
+	if strings.TrimSpace(req.StartURL) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "startUrl is required"})
+		return
+	}
+
+	sessionID, authorizeURL, expiresIn, err := KiroAuth.StartIamSsoLogin(req.StartURL, req.Region)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"sessionId": sessionID, "authorizeUrl": authorizeURL, "expiresIn": expiresIn})
+}
+
+func AdminCompleteIamSSO(c *gin.Context) {
+	var req struct {
+		SessionID   string `json:"sessionId"`
+		CallbackURL string `json:"callbackUrl"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON"})
+		return
+	}
+
+	accessToken, refreshToken, clientID, clientSecret, region, expiresIn, err := KiroAuth.CompleteIamSsoLogin(req.SessionID, req.CallbackURL)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	email, userID, _ := KiroAuth.GetUserInfo(accessToken)
+	reqData := kiroGoAccountRequest{
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
+		AuthMethod:   "idc",
+		Region:       region,
+		Enabled:      boolPtr(true),
+		ExpiresAt:    time.Now().Unix() + int64(expiresIn),
+		Email:        email,
+		UserID:       userID,
+		MachineID:    uuid.NewString(),
+	}
+
+	id, addErr := addOrImportAccount(reqData)
+	if addErr != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": addErr.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "account": gin.H{"id": strconv.Itoa(id), "email": email}})
+}
+
+func AdminImportSsoToken(c *gin.Context) {
+	var req struct {
+		BearerToken string `json:"bearerToken"`
+		Region      string `json:"region"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON"})
+		return
+	}
+	if strings.TrimSpace(req.BearerToken) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "bearerToken is required"})
+		return
+	}
+
+	tokens := strings.Split(strings.TrimSpace(req.BearerToken), "\n")
+	imported := make([]gin.H, 0)
+	errs := make([]string, 0)
+
+	for _, token := range tokens {
+		token = strings.TrimSpace(token)
+		if token == "" {
+			continue
+		}
+		accessToken, refreshToken, clientID, clientSecret, expiresIn, err := KiroAuth.ImportFromSsoToken(token, req.Region)
+		if err != nil {
+			errs = append(errs, err.Error())
+			continue
+		}
+
+		email, userID, _ := KiroAuth.GetUserInfo(accessToken)
+		reqData := kiroGoAccountRequest{
+			AccessToken:  accessToken,
+			RefreshToken: refreshToken,
+			ClientID:     clientID,
+			ClientSecret: clientSecret,
+			AuthMethod:   "idc",
+			Region:       req.Region,
+			Enabled:      boolPtr(true),
+			ExpiresAt:    time.Now().Unix() + int64(expiresIn),
+			Email:        email,
+			UserID:       userID,
+			MachineID:    uuid.NewString(),
+		}
+		id, addErr := addOrImportAccount(reqData)
+		if addErr != nil {
+			errs = append(errs, addErr.Error())
+			continue
+		}
+		imported = append(imported, gin.H{"id": strconv.Itoa(id), "email": email})
+	}
+
+	if len(imported) == 0 && len(errs) > 0 {
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": strings.Join(errs, "; ")})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "accounts": imported, "errors": errs})
+}
+
+func normalizeAuthMethod(authMethod, clientID, clientSecret string) string {
+	m := strings.ToLower(strings.TrimSpace(authMethod))
+	switch m {
+	case "idc", "builderid", "enterprise":
+		return "idc"
+	case "social", "google", "github":
+		return "social"
+	default:
+		if strings.TrimSpace(clientID) != "" && strings.TrimSpace(clientSecret) != "" {
+			return "idc"
+		}
+		return "social"
+	}
+}
+
+func AdminImportCredentials(c *gin.Context) {
+	var req struct {
+		AccessToken  string `json:"accessToken"`
+		RefreshToken string `json:"refreshToken"`
+		ClientID     string `json:"clientId"`
+		ClientSecret string `json:"clientSecret"`
+		AuthMethod   string `json:"authMethod"`
+		Provider     string `json:"provider"`
+		Region       string `json:"region"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON"})
+		return
+	}
+
+	if strings.TrimSpace(req.RefreshToken) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "refreshToken is required"})
+		return
+	}
+
+	if strings.TrimSpace(req.Region) == "" {
+		req.Region = "us-east-1"
+	}
+	req.AuthMethod = normalizeAuthMethod(req.AuthMethod, req.ClientID, req.ClientSecret)
+
+	accessToken := strings.TrimSpace(req.AccessToken)
+	expiresAt := time.Now().Unix() + 300
+
+	freshAccess, freshRefresh, freshExpires, refreshErr := KiroAuth.RefreshToken(KiroAuth.RefreshInput{
+		RefreshToken: strings.TrimSpace(req.RefreshToken),
+		ClientID:     strings.TrimSpace(req.ClientID),
+		ClientSecret: strings.TrimSpace(req.ClientSecret),
+		AuthMethod:   req.AuthMethod,
+		Region:       req.Region,
+	})
+	if refreshErr == nil {
+		accessToken = freshAccess
+		if strings.TrimSpace(freshRefresh) != "" {
+			req.RefreshToken = freshRefresh
+		}
+		expiresAt = freshExpires
+	} else if accessToken == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Token refresh failed: " + refreshErr.Error()})
+		return
+	}
+
+	email, userID, _ := KiroAuth.GetUserInfo(accessToken)
+	reqData := kiroGoAccountRequest{
+		AccessToken:  accessToken,
+		RefreshToken: req.RefreshToken,
+		ClientID:     req.ClientID,
+		ClientSecret: req.ClientSecret,
+		AuthMethod:   req.AuthMethod,
+		Provider:     req.Provider,
+		Region:       req.Region,
+		ExpiresAt:    expiresAt,
+		Enabled:      boolPtr(true),
+		Email:        email,
+		UserID:       userID,
+		MachineID:    uuid.NewString(),
+	}
+	id, addErr := addOrImportAccount(reqData)
+	if addErr != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": addErr.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "account": gin.H{"id": strconv.Itoa(id), "email": email}})
+}
+
+func AdminTestAccount(c *gin.Context) {
+	var req struct {
+		RefreshToken string `json:"refresh_token"`
+		ClientID     string `json:"client_id"`
+		ClientSecret string `json:"client_secret"`
+	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
 
-	if req.BearerToken != nil {
-		if err := os.Setenv("BEARER_TOKEN", strings.TrimSpace(*req.BearerToken)); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
+	account := kiroGoAccountRequest{
+		RefreshToken: req.RefreshToken,
+		ClientID:     req.ClientID,
+		ClientSecret: req.ClientSecret,
+		AuthMethod:   normalizeAuthMethod("", req.ClientID, req.ClientSecret),
+		Region:       "us-east-1",
 	}
-	if req.AdminToken != nil {
-		if err := os.Setenv("ADMIN_TOKEN", strings.TrimSpace(*req.AdminToken)); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
+
+	token, _, expiresAt, err := KiroAuth.RefreshToken(KiroAuth.RefreshInput{
+		RefreshToken: account.RefreshToken,
+		ClientID:     account.ClientID,
+		ClientSecret: account.ClientSecret,
+		AuthMethod:   account.AuthMethod,
+		Region:       account.Region,
+	})
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
 	}
-	if req.OIDCURL != nil {
-		if err := os.Setenv("OIDC_URL", strings.TrimSpace(*req.OIDCURL)); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
+
+	preview := token
+	if len(preview) > 12 {
+		preview = preview[:6] + "..." + preview[len(preview)-6:]
 	}
-	if req.AmazonQURL != nil {
-		if err := os.Setenv("AMAZON_Q_URL", strings.TrimSpace(*req.AmazonQURL)); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
+	c.JSON(http.StatusOK, gin.H{"message": "account token test passed", "access_token_preview": preview, "expires_at": expiresAt})
+}
+
+func AdminRefreshTokens(c *gin.Context) {
+	refreshed, failed := Utils.RefreshAllActiveTokensNow()
+	c.JSON(http.StatusOK, gin.H{"message": "active token refresh completed", "refreshed": refreshed, "failed": failed})
+}
+
+func AdminSetRuntimeConfig(c *gin.Context) {
+	var req map[string]interface{}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
 	}
-	if req.ProxyURL != nil {
-		if err := os.Setenv("PROXY_URL", strings.TrimSpace(*req.ProxyURL)); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
+
+	for k, v := range req {
+		vv := ""
+		switch t := v.(type) {
+		case string:
+			vv = t
+		case bool:
+			if t {
+				vv = "true"
+			} else {
+				vv = "false"
+			}
+		default:
+			b, _ := json.Marshal(t)
+			vv = string(b)
 		}
-	}
-	if req.AccountSource != nil {
-		if err := os.Setenv("ACCOUNT_SOURCE", strings.TrimSpace(*req.AccountSource)); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-	}
-	if req.AccountsCSVPath != nil {
-		if err := os.Setenv("ACCOUNTS_CSV_PATH", strings.TrimSpace(*req.AccountsCSVPath)); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-	}
-	if req.AccountAPIURL != nil {
-		if err := os.Setenv("ACCOUNT_API_URL", strings.TrimSpace(*req.AccountAPIURL)); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-	}
-	if req.AccountAPIToken != nil {
-		if err := os.Setenv("ACCOUNT_API_TOKEN", strings.TrimSpace(*req.AccountAPIToken)); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-	}
-	if req.AccountCategoryID != nil {
-		if err := os.Setenv("ACCOUNT_CATEGORY_ID", strings.TrimSpace(*req.AccountCategoryID)); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-	}
-	if req.ActiveTokenCount != nil {
-		if err := os.Setenv("ACTIVE_TOKEN_COUNT", strings.TrimSpace(*req.ActiveTokenCount)); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-	}
-	if req.MaxRefreshAttempt != nil {
-		if err := os.Setenv("MAX_REFRESH_ATTEMPT", strings.TrimSpace(*req.MaxRefreshAttempt)); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
+		switch k {
+		case "bearer_token":
+			_ = os.Setenv("BEARER_TOKEN", strings.TrimSpace(vv))
+		case "admin_token":
+			_ = os.Setenv("ADMIN_TOKEN", strings.TrimSpace(vv))
+		case "oidc_url":
+			_ = os.Setenv("OIDC_URL", strings.TrimSpace(vv))
+		case "amazon_q_url":
+			_ = os.Setenv("AMAZON_Q_URL", strings.TrimSpace(vv))
+		case "proxy_url":
+			_ = os.Setenv("PROXY_URL", strings.TrimSpace(vv))
+		case "account_source":
+			_ = os.Setenv("ACCOUNT_SOURCE", strings.TrimSpace(vv))
+		case "accounts_csv_path":
+			_ = os.Setenv("ACCOUNTS_CSV_PATH", strings.TrimSpace(vv))
+		case "account_api_url":
+			_ = os.Setenv("ACCOUNT_API_URL", strings.TrimSpace(vv))
+		case "account_api_token":
+			_ = os.Setenv("ACCOUNT_API_TOKEN", strings.TrimSpace(vv))
+		case "account_category_id":
+			_ = os.Setenv("ACCOUNT_CATEGORY_ID", strings.TrimSpace(vv))
+		case "active_token_count":
+			_ = os.Setenv("ACTIVE_TOKEN_COUNT", strings.TrimSpace(vv))
+		case "max_refresh_attempt":
+			_ = os.Setenv("MAX_REFRESH_ATTEMPT", strings.TrimSpace(vv))
 		}
 	}
 
@@ -164,213 +987,3 @@ func AdminSetRuntimeConfig(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "runtime config updated"})
 }
-
-func AdminAddAccount(c *gin.Context) {
-	var req addAccountRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
-		return
-	}
-
-	account, err := Utils.AddManualAccount(req.RefreshToken, req.ClientID, req.ClientSecret, req.Activate)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"message": "account added", "account": account})
-}
-
-func AdminRefreshTokens(c *gin.Context) {
-	refreshed, failed := Utils.RefreshAllActiveTokensNow()
-	c.JSON(http.StatusOK, gin.H{
-		"message":   "active token refresh completed",
-		"refreshed": refreshed,
-		"failed":    failed,
-	})
-}
-
-func AdminTestAccount(c *gin.Context) {
-	var req addAccountRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
-		return
-	}
-	rt := Models.RefreshToken{
-		Token:        strings.TrimSpace(req.RefreshToken),
-		ClientId:     strings.TrimSpace(req.ClientID),
-		ClientSecret: strings.TrimSpace(req.ClientSecret),
-	}
-	if rt.Token == "" || rt.ClientId == "" || rt.ClientSecret == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "refresh_token, client_id, client_secret are required"})
-		return
-	}
-
-	token, err := Utils.GetAccessTokenFromRefreshToken(rt)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{
-		"message":              "account token test passed",
-		"access_token_preview": maskSecret(token.Token),
-		"expires_at":           token.ExpiresAt,
-	})
-}
-
-const adminPanelHTML = `<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>kilocli2 管理面板</title>
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 24px; color: #111827; background: #f8fafc; }
-    .card { background: white; border: 1px solid #e5e7eb; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
-    h1,h2 { margin: 0 0 12px 0; }
-    input, textarea, button { font-size: 14px; padding: 8px; margin: 4px 0; width: 100%; box-sizing: border-box; }
-    button { cursor: pointer; background: #111827; color: #fff; border: none; border-radius: 8px; }
-    button.secondary { background: #4b5563; }
-    pre { white-space: pre-wrap; word-break: break-word; background: #0f172a; color: #e2e8f0; padding: 12px; border-radius: 8px; max-height: 320px; overflow: auto; }
-    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .small { color: #6b7280; font-size: 12px; }
-  </style>
-</head>
-<body>
-  <h1>kilocli2 管理面板</h1>
-  <p class="small">云端部署可直接访问该页面；首次调用 API 时会提示输入 <code>x-admin-token</code>（或 Authorization Bearer）。</p>
-
-  <div class="card">
-    <h2>状态概览</h2>
-    <button onclick="loadStatus()">刷新状态</button>
-    <pre id="status"></pre>
-  </div>
-
-  <div class="card">
-    <h2>手动录入账号令牌</h2>
-    <div class="row">
-      <div><input id="refresh_token" placeholder="refresh_token" /></div>
-      <div><input id="client_id" placeholder="client_id" /></div>
-    </div>
-    <input id="client_secret" placeholder="client_secret" />
-    <label><input id="activate" type="checkbox" style="width:auto;"> 添加后立即激活并拉取 access token</label>
-    <button onclick="testAccount()" class="secondary">先测试账号</button>
-    <button onclick="addAccount()">添加账号</button>
-    <pre id="account_result"></pre>
-  </div>
-
-  <div class="card">
-    <h2>运行时配置（即时生效）</h2>
-    <div class="row">
-      <div><input id="bearer_token" placeholder="BEARER_TOKEN（可选，留空不改）" /></div>
-      <div><input id="admin_token" placeholder="ADMIN_TOKEN（可选，留空不改）" /></div>
-    </div>
-    <div class="row">
-      <div><input id="oidc_url" placeholder="OIDC_URL（可选）" /></div>
-      <div><input id="amazon_q_url" placeholder="AMAZON_Q_URL（可选）" /></div>
-    </div>
-    <div class="row">
-      <div><input id="proxy_url" placeholder="PROXY_URL（可选，可留空清空）" /></div>
-      <div><input id="account_source" placeholder="ACCOUNT_SOURCE（manual/csv/api，可选）" /></div>
-    </div>
-    <div class="row">
-      <div><input id="accounts_csv_path" placeholder="ACCOUNTS_CSV_PATH（可选）" /></div>
-      <div><input id="account_api_url" placeholder="ACCOUNT_API_URL（可选）" /></div>
-    </div>
-    <div class="row">
-      <div><input id="account_api_token" placeholder="ACCOUNT_API_TOKEN（可选）" /></div>
-      <div><input id="account_category_id" placeholder="ACCOUNT_CATEGORY_ID（可选）" /></div>
-    </div>
-    <div class="row">
-      <div><input id="active_token_count" placeholder="ACTIVE_TOKEN_COUNT（可选）" /></div>
-      <div><input id="max_refresh_attempt" placeholder="MAX_REFRESH_ATTEMPT（可选）" /></div>
-    </div>
-    <button onclick="updateConfig()">更新配置</button>
-    <pre id="config_result"></pre>
-  </div>
-
-  <div class="card">
-    <h2>Token 管理</h2>
-    <button onclick="refreshTokens()">手动刷新全部活跃 token</button>
-    <pre id="refresh_result"></pre>
-  </div>
-
-  <script>
-    function tokenHeader() {
-      const token = localStorage.getItem("admin_token") || prompt("请输入 x-admin-token");
-      if (!token) throw new Error("缺少 admin token");
-      localStorage.setItem("admin_token", token);
-      return { "Content-Type": "application/json", "x-admin-token": token };
-    }
-
-    async function request(url, method = "GET", body = null) {
-      const res = await fetch(url, {
-        method,
-        headers: tokenHeader(),
-        body: body ? JSON.stringify(body) : null
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || JSON.stringify(data));
-      return data;
-    }
-
-    async function loadStatus() {
-      try {
-        const data = await request("/admin/api/status");
-        document.getElementById("status").textContent = JSON.stringify(data, null, 2);
-      } catch (e) { document.getElementById("status").textContent = e.message; }
-    }
-
-    function accountBody() {
-      return {
-        refresh_token: document.getElementById("refresh_token").value,
-        client_id: document.getElementById("client_id").value,
-        client_secret: document.getElementById("client_secret").value,
-        activate: document.getElementById("activate").checked
-      };
-    }
-
-    async function testAccount() {
-      try {
-        const data = await request("/admin/api/accounts/test", "POST", accountBody());
-        document.getElementById("account_result").textContent = JSON.stringify(data, null, 2);
-      } catch (e) { document.getElementById("account_result").textContent = e.message; }
-    }
-
-    async function addAccount() {
-      try {
-        const data = await request("/admin/api/accounts", "POST", accountBody());
-        document.getElementById("account_result").textContent = JSON.stringify(data, null, 2);
-        loadStatus();
-      } catch (e) { document.getElementById("account_result").textContent = e.message; }
-    }
-
-    async function updateConfig() {
-      const body = {};
-      [
-        "bearer_token","admin_token","oidc_url","amazon_q_url",
-        "account_source","accounts_csv_path","account_api_url","account_api_token",
-        "account_category_id","active_token_count","max_refresh_attempt"
-      ].forEach((k) => {
-        const v = document.getElementById(k).value;
-        if (v !== "") body[k] = v;
-      });
-      body.proxy_url = document.getElementById("proxy_url").value;
-      try {
-        const data = await request("/admin/api/config", "POST", body);
-        document.getElementById("config_result").textContent = JSON.stringify(data, null, 2);
-        loadStatus();
-      } catch (e) { document.getElementById("config_result").textContent = e.message; }
-    }
-
-    async function refreshTokens() {
-      try {
-        const data = await request("/admin/api/tokens/refresh", "POST", {});
-        document.getElementById("refresh_result").textContent = JSON.stringify(data, null, 2);
-        loadStatus();
-      } catch (e) { document.getElementById("refresh_result").textContent = e.message; }
-    }
-
-    loadStatus();
-  </script>
-</body>
-</html>`
