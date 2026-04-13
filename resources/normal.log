@@ -1,0 +1,5 @@
+2026/04/13 06:30:00 Warning: .env file not found, using system values. Docker user ignore this.
+2026/04/13 06:30:00 Bootstrap admin token generated (preview): 2af3dd9b...885d2247
+2026/04/13 06:30:00 Full bootstrap admin token saved at: data/config.json
+2026/04/13 06:30:00 Security Warning: rotate bootstrap admin token in the admin panel after first login.
+2026/04/13 06:30:00 Server starting on :4000

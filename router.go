@@ -21,7 +21,8 @@ func setupRouter(r *gin.Engine) {
 	r.POST("/debug/token", API.DebugToken)
 	r.POST("/debug/anthropic2q", API.DebugAnthropic2Q)
 
-	r.GET("/admin/*filepath", API.AdminStatic)
+	r.GET("/admin", API.AdminStatic)
+	r.GET("/admin/", API.AdminStatic)
 
 	admin := r.Group("/admin/api")
 	admin.Use(Middleware.AdminAuth())

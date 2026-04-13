@@ -1,0 +1,16 @@
+{
+  "port": "4000",
+  "gin_mode": "release",
+  "bearer_token": "",
+  "admin_token": "2af3dd9b-6055-40c3-988c-d00b885d2247",
+  "oidc_url": "",
+  "amazon_q_url": "",
+  "proxy_url": "",
+  "account_source": "manual",
+  "accounts_csv_path": "",
+  "account_api_url": "",
+  "account_api_token": "",
+  "account_category_id": "3",
+  "active_token_count": "10",
+  "max_refresh_attempt": "3"
+}
