@@ -237,7 +237,7 @@ const adminPanelHTML = `<!DOCTYPE html>
 </head>
 <body>
   <h1>kilocli2 管理面板</h1>
-  <p class="small">云端部署可直接访问该页面；请在请求头中携带 <code>x-admin-token</code>（或 Authorization Bearer）。</p>
+  <p class="small">云端部署可直接访问该页面；首次调用 API 时会提示输入 <code>x-admin-token</code>（或 Authorization Bearer）。</p>
 
   <div class="card">
     <h2>状态概览</h2>

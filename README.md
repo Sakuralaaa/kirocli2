@@ -19,7 +19,7 @@
 - `GET /v1/models`
 - `POST /debug/token`（无鉴权）
 - `POST /debug/anthropic2q`（无鉴权）
-- `GET /admin`（管理面板，需 admin token）
+- `GET /admin`（管理面板页面，无需鉴权）
 
 ## 运行前准备
 
@@ -84,7 +84,7 @@ go run .
 - 手动刷新活跃 token：`POST /admin/api/tokens/refresh`
 - 运行时更新配置：`POST /admin/api/config`
 
-鉴权方式：
+鉴权方式（适用于 `/admin/api/*` 请求）：
 
 - 请求头 `x-admin-token: <ADMIN_TOKEN>`
 - 或 `Authorization: Bearer <ADMIN_TOKEN>`
