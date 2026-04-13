@@ -21,8 +21,6 @@ func setupRouter(r *gin.Engine) {
 	r.POST("/debug/token", API.DebugToken)
 	r.POST("/debug/anthropic2q", API.DebugAnthropic2Q)
 
-	r.GET("/admin", API.AdminPanel)
-	r.GET("/admin/", API.AdminPanel)
 	r.GET("/admin/*filepath", API.AdminStatic)
 
 	admin := r.Group("/admin/api")
