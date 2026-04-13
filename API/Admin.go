@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -42,15 +43,39 @@ type kiroGoAccountRequest struct {
 	Weight       int    `json:"weight"`
 }
 
+// webRoot returns the absolute path to the "web" directory.
+// It first checks next to the running executable (reliable in containers),
+// then falls back to a path relative to the working directory.
+// The result is computed once and cached.
+var (
+	webRootOnce  sync.Once
+	webRootValue string
+)
+
+func webRoot() string {
+	webRootOnce.Do(func() {
+		if exe, err := os.Executable(); err == nil {
+			candidate := filepath.Join(filepath.Dir(exe), "web")
+			if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+				webRootValue = candidate
+				return
+			}
+		}
+		webRootValue = "web"
+	})
+	return webRootValue
+}
+
 func AdminPanel(c *gin.Context) {
-	c.File("web/index.html")
+	c.File(filepath.Join(webRoot(), "index.html"))
 }
 
 func AdminStatic(c *gin.Context) {
 	cleaned := filepath.Clean("/" + strings.TrimSpace(c.Param("filepath")))
 	rel := strings.TrimPrefix(cleaned, "/")
+	root := webRoot()
 	if rel == "." || rel == "" {
-		c.File("web/index.html")
+		c.File(filepath.Join(root, "index.html"))
 		return
 	}
 	allowedExt := map[string]bool{
@@ -61,8 +86,8 @@ func AdminStatic(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid static file type"})
 		return
 	}
-	target := filepath.Join("web", rel)
-	relativeToRoot, err := filepath.Rel("web", target)
+	target := filepath.Join(root, rel)
+	relativeToRoot, err := filepath.Rel(root, target)
 	if err != nil || strings.HasPrefix(relativeToRoot, "..") {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid static path"})
 		return

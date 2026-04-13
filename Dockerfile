@@ -13,6 +13,7 @@ FROM alpine:latest
 WORKDIR /app
 
 COPY --from=builder /app/kilocli2api .
+COPY --from=builder /app/web ./web
 
 EXPOSE 4000
 
