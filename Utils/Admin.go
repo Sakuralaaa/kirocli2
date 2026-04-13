@@ -4,6 +4,8 @@ import (
 	"encoding/csv"
 	"fmt"
 	"os"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,6 +17,7 @@ const csvEnabledValue = "True"
 type AdminAccountSnapshot struct {
 	ID                  int    `json:"id"`
 	ClientID            string `json:"client_id"`
+	ClientSecretPreview string `json:"client_secret_preview"`
 	RefreshTokenPreview string `json:"refresh_token_preview"`
 	Active              bool   `json:"active"`
 	Disabled            bool   `json:"disabled"`
@@ -67,6 +70,7 @@ func GetAdminSnapshot() AdminSnapshot {
 		accounts = append(accounts, AdminAccountSnapshot{
 			ID:                  item.ID,
 			ClientID:            item.ClientId,
+			ClientSecretPreview: maskToken(item.ClientSecret),
 			RefreshTokenPreview: maskToken(item.Token),
 			Active:              isActive,
 			Disabled:            item.Disabled,
@@ -127,6 +131,127 @@ func persistManualAccount(rt Models.RefreshToken) error {
 	return saveAPIAccountsToJSON(accounts)
 }
 
+func nextAccountIDLocked() int {
+	maxID := 0
+	for _, item := range RefreshTokens {
+		if item.ID > maxID {
+			maxID = item.ID
+		}
+	}
+	return maxID + 1
+}
+
+func ensureAccountIDsLocked() bool {
+	changed := false
+	used := map[int]bool{}
+	nextID := 1
+	for _, item := range RefreshTokens {
+		if item.ID > 0 {
+			used[item.ID] = true
+			if item.ID >= nextID {
+				nextID = item.ID + 1
+			}
+		}
+	}
+	seen := map[int]bool{}
+	for idx, item := range RefreshTokens {
+		if item.ID <= 0 || seen[item.ID] {
+			for used[nextID] {
+				nextID++
+			}
+			RefreshTokens[idx].ID = nextID
+			used[nextID] = true
+			nextID++
+			changed = true
+			continue
+		}
+		seen[item.ID] = true
+		used[item.ID] = true
+	}
+	return changed
+}
+
+func persistAllAccountsLocked() error {
+	if csvPath != "" {
+		csvMutex.Lock()
+		defer csvMutex.Unlock()
+
+		header := []string{"enabled", "refresh_token", "client_id", "client_secret"}
+		if data, err := os.ReadFile(csvPath); err == nil {
+			lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
+			if len(lines) > 0 && strings.TrimSpace(lines[0]) != "" {
+				parts := strings.Split(lines[0], ",")
+				if len(parts) >= 4 {
+					header = parts
+				}
+			}
+		}
+
+		file, err := os.OpenFile(csvPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+
+		w := csv.NewWriter(file)
+		if err := w.Write(header); err != nil {
+			return err
+		}
+		for _, item := range RefreshTokens {
+			enabled := "True"
+			if item.Disabled {
+				enabled = "False"
+			}
+			if err := w.Write([]string{enabled, item.Token, item.ClientId, item.ClientSecret}); err != nil {
+				return err
+			}
+		}
+		w.Flush()
+		return w.Error()
+	}
+
+	csvMutex.Lock()
+	defer csvMutex.Unlock()
+
+	accounts := make([]APIAccount, 0, len(RefreshTokens))
+	for _, item := range RefreshTokens {
+		accounts = append(accounts, APIAccount{
+			ID:           item.ID,
+			RefreshToken: item.Token,
+			ClientID:     item.ClientId,
+			ClientSecret: item.ClientSecret,
+		})
+	}
+	return saveAPIAccountsToJSON(accounts)
+}
+
+func removeActiveTokenIndexLocked(target int) {
+	next := make([]int, 0, len(ActiveTokens))
+	for _, idx := range ActiveTokens {
+		if idx != target {
+			next = append(next, idx)
+		}
+	}
+	ActiveTokens = next
+}
+
+func hasActiveTokenIndexLocked(target int) bool {
+	for _, idx := range ActiveTokens {
+		if idx == target {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeActiveTokenIndicesLocked(removed int) {
+	for i, idx := range ActiveTokens {
+		if idx > removed {
+			ActiveTokens[i] = idx - 1
+		}
+	}
+}
+
 func AddManualAccount(refreshToken, clientID, clientSecret string, activate bool) (AdminAccountSnapshot, error) {
 	refreshToken = strings.TrimSpace(refreshToken)
 	clientID = strings.TrimSpace(clientID)
@@ -152,12 +277,16 @@ func AddManualAccount(refreshToken, clientID, clientSecret string, activate bool
 
 	tokenMutex.Lock()
 	defer tokenMutex.Unlock()
+	if ensureAccountIDsLocked() {
+		_ = persistAllAccountsLocked()
+	}
 
 	for _, item := range RefreshTokens {
 		if item.Token == refreshToken {
 			return AdminAccountSnapshot{}, fmt.Errorf("refresh token already exists")
 		}
 	}
+	newEntry.ID = nextAccountIDLocked()
 
 	RefreshTokens = append(RefreshTokens, newEntry)
 	idx := len(RefreshTokens) - 1
@@ -175,11 +304,167 @@ func AddManualAccount(refreshToken, clientID, clientSecret string, activate bool
 	return AdminAccountSnapshot{
 		ID:                  newEntry.ID,
 		ClientID:            newEntry.ClientId,
+		ClientSecretPreview: maskToken(newEntry.ClientSecret),
 		RefreshTokenPreview: maskToken(newEntry.Token),
 		Active:              activate,
 		Disabled:            false,
 		ExpiresAt:           newEntry.AccessToken.ExpiresAt,
 	}, nil
+}
+
+func ListAdminAccounts() []AdminAccountSnapshot {
+	tokenMutex.Lock()
+	defer tokenMutex.Unlock()
+	if ensureAccountIDsLocked() {
+		_ = persistAllAccountsLocked()
+	}
+
+	activeSet := map[int]bool{}
+	for _, idx := range ActiveTokens {
+		activeSet[idx] = true
+	}
+
+	accounts := make([]AdminAccountSnapshot, 0, len(RefreshTokens))
+	for idx, item := range RefreshTokens {
+		accounts = append(accounts, AdminAccountSnapshot{
+			ID:                  item.ID,
+			ClientID:            item.ClientId,
+			ClientSecretPreview: maskToken(item.ClientSecret),
+			RefreshTokenPreview: maskToken(item.Token),
+			Active:              activeSet[idx] && !item.Disabled,
+			Disabled:            item.Disabled,
+			ExpiresAt:           item.AccessToken.ExpiresAt,
+		})
+	}
+
+	sort.Slice(accounts, func(i, j int) bool { return accounts[i].ID < accounts[j].ID })
+	return accounts
+}
+
+func UpdateAccountByID(id int, enabled *bool, clientID, clientSecret, refreshToken *string) (AdminAccountSnapshot, error) {
+	tokenMutex.Lock()
+	defer tokenMutex.Unlock()
+	if ensureAccountIDsLocked() {
+		_ = persistAllAccountsLocked()
+	}
+
+	targetIdx := -1
+	for idx, item := range RefreshTokens {
+		if item.ID == id {
+			targetIdx = idx
+			break
+		}
+	}
+	if targetIdx < 0 {
+		return AdminAccountSnapshot{}, fmt.Errorf("account not found")
+	}
+
+	if clientID != nil {
+		RefreshTokens[targetIdx].ClientId = strings.TrimSpace(*clientID)
+	}
+	if clientSecret != nil {
+		RefreshTokens[targetIdx].ClientSecret = strings.TrimSpace(*clientSecret)
+	}
+	if refreshToken != nil {
+		newToken := strings.TrimSpace(*refreshToken)
+		if newToken == "" {
+			return AdminAccountSnapshot{}, fmt.Errorf("refresh token cannot be empty")
+		}
+		for idx, item := range RefreshTokens {
+			if idx != targetIdx && item.Token == newToken {
+				return AdminAccountSnapshot{}, fmt.Errorf("refresh token already exists")
+			}
+		}
+		RefreshTokens[targetIdx].Token = newToken
+	}
+	if enabled != nil {
+		RefreshTokens[targetIdx].Disabled = !*enabled
+		if *enabled {
+			if !hasActiveTokenIndexLocked(targetIdx) {
+				ActiveTokens = append(ActiveTokens, targetIdx)
+			}
+		} else {
+			removeActiveTokenIndexLocked(targetIdx)
+		}
+	}
+
+	if err := persistAllAccountsLocked(); err != nil {
+		return AdminAccountSnapshot{}, fmt.Errorf("failed to persist account changes: %w", err)
+	}
+
+	isActive := hasActiveTokenIndexLocked(targetIdx) && !RefreshTokens[targetIdx].Disabled
+	item := RefreshTokens[targetIdx]
+	return AdminAccountSnapshot{
+		ID:                  item.ID,
+		ClientID:            item.ClientId,
+		ClientSecretPreview: maskToken(item.ClientSecret),
+		RefreshTokenPreview: maskToken(item.Token),
+		Active:              isActive,
+		Disabled:            item.Disabled,
+		ExpiresAt:           item.AccessToken.ExpiresAt,
+	}, nil
+}
+
+func DeleteAccountByID(id int) error {
+	tokenMutex.Lock()
+	defer tokenMutex.Unlock()
+	if ensureAccountIDsLocked() {
+		_ = persistAllAccountsLocked()
+	}
+
+	targetIdx := -1
+	for idx, item := range RefreshTokens {
+		if item.ID == id {
+			targetIdx = idx
+			break
+		}
+	}
+	if targetIdx < 0 {
+		return fmt.Errorf("account not found")
+	}
+
+	removeActiveTokenIndexLocked(targetIdx)
+	RefreshTokens = append(RefreshTokens[:targetIdx], RefreshTokens[targetIdx+1:]...)
+	normalizeActiveTokenIndicesLocked(targetIdx)
+
+	if err := persistAllAccountsLocked(); err != nil {
+		return fmt.Errorf("failed to persist account deletion: %w", err)
+	}
+
+	return nil
+}
+
+func BatchAddManualAccounts(records []map[string]interface{}) (int, []string) {
+	success := 0
+	errs := make([]string, 0)
+	for idx, rec := range records {
+		rt, _ := rec["refresh_token"].(string)
+		cid, _ := rec["client_id"].(string)
+		sec, _ := rec["client_secret"].(string)
+		activate := false
+		if raw, ok := rec["activate"]; ok {
+			switch v := raw.(type) {
+			case bool:
+				activate = v
+			case string:
+				activate = strings.EqualFold(strings.TrimSpace(v), "true")
+			}
+		}
+		if _, err := AddManualAccount(rt, cid, sec, activate); err != nil {
+			errs = append(errs, fmt.Sprintf("line %d: %v", idx+1, err))
+			continue
+		}
+		success++
+	}
+	return success, errs
+}
+
+func ParseAccountID(raw string) (int, error) {
+	id, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || id <= 0 {
+		return 0, fmt.Errorf("invalid account id")
+	}
+	return id, nil
 }
 
 func RefreshAllActiveTokensNow() (int, int) {

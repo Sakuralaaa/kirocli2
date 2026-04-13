@@ -24,6 +24,9 @@ func AdminAuth() gin.HandlerFunc {
 
 		token := strings.TrimSpace(c.GetHeader("x-admin-token"))
 		if token == "" {
+			token = strings.TrimSpace(c.GetHeader("X-Admin-Password"))
+		}
+		if token == "" {
 			authHeader := strings.TrimSpace(c.GetHeader("Authorization"))
 			if strings.HasPrefix(authHeader, "Bearer ") {
 				token = strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
@@ -31,7 +34,7 @@ func AdminAuth() gin.HandlerFunc {
 		}
 
 		if token == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "x-admin-token or Authorization header required"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "x-admin-token / X-Admin-Password or Authorization header required"})
 			c.Abort()
 			return
 		}

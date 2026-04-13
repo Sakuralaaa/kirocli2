@@ -79,10 +79,18 @@ go run .
 
 - 页面：`GET /admin`
 - 状态：`GET /admin/api/status`
+- 账号列表：`GET /admin/api/accounts`
 - 手动录入账号：`POST /admin/api/accounts`
+- 批量录入账号：`POST /admin/api/accounts/batch`
+- 更新账号：`PUT /admin/api/accounts/:id`
+- 删除账号：`DELETE /admin/api/accounts/:id`
 - 手动测试账号：`POST /admin/api/accounts/test`
 - 手动刷新活跃 token：`POST /admin/api/tokens/refresh`
 - 运行时更新配置：`POST /admin/api/config`
+- 设置读取：`GET /admin/api/settings`
+- 统计信息：`GET /admin/api/stats`、`POST /admin/api/stats/reset`
+- 端点配置：`GET /admin/api/endpoint`、`POST /admin/api/endpoint`
+- 版本信息：`GET /admin/api/version`
 
 鉴权方式（适用于 `/admin/api/*` 请求）：
 

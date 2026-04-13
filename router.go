@@ -28,10 +28,20 @@ func setupRouter(r *gin.Engine) {
 	admin.Use(Middleware.AdminAuth())
 	{
 		admin.GET("/status", API.AdminStatus)
+		admin.GET("/accounts", API.AdminGetAccounts)
 		admin.POST("/config", API.AdminSetRuntimeConfig)
+		admin.GET("/settings", API.AdminGetSettings)
 		admin.POST("/accounts", API.AdminAddAccount)
+		admin.POST("/accounts/batch", API.AdminBatchAccounts)
+		admin.PUT("/accounts/:id", API.AdminUpdateAccount)
+		admin.DELETE("/accounts/:id", API.AdminDeleteAccount)
 		admin.POST("/accounts/test", API.AdminTestAccount)
 		admin.POST("/tokens/refresh", API.AdminRefreshTokens)
+		admin.GET("/stats", API.AdminGetStats)
+		admin.POST("/stats/reset", API.AdminResetStats)
+		admin.GET("/endpoint", API.AdminGetEndpoint)
+		admin.POST("/endpoint", API.AdminUpdateEndpoint)
+		admin.GET("/version", API.AdminVersion)
 	}
 
 	r.NoRoute(API.NotFound)
