@@ -226,19 +226,19 @@ func persistAllAccountsLocked() error {
 	return persistAllAccountsToJSONLocked()
 }
 
-func removeActiveTokenIndexLocked(target int) {
+func removeActiveTokenIndexLocked(targetIdx int) {
 	next := make([]int, 0, len(ActiveTokens))
 	for _, idx := range ActiveTokens {
-		if idx != target {
+		if idx != targetIdx {
 			next = append(next, idx)
 		}
 	}
 	ActiveTokens = next
 }
 
-func hasActiveTokenIndexLocked(target int) bool {
+func hasActiveTokenIndexLocked(targetIdx int) bool {
 	for _, idx := range ActiveTokens {
-		if idx == target {
+		if idx == targetIdx {
 			return true
 		}
 	}
